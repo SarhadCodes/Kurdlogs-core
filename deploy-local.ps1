@@ -69,7 +69,42 @@ function Show-KlProgress([string]$Label) {
   Write-Host ''
 }
 
+function Ensure-KlEnv {
+  $envPath = Join-Path $PSScriptRoot '.env'
+  $example = Join-Path $PSScriptRoot '.env.example'
+  if (Test-Path $envPath) {
+    Show-KlInfo '.env found'
+    return
+  }
+
+  if (Test-Path $example) {
+    Copy-Item $example $envPath -Force
+    $text = Get-Content $envPath -Raw
+    $text = $text -replace 'YOUR_VPS_IP', 'localhost'
+    $text = $text -replace 'POSTGRES_PASSWORD=change-me-db-password', 'POSTGRES_PASSWORD=postgres'
+    $text = $text -replace 'JWT_SECRET=change-me-long-random-secret', 'JWT_SECRET=local-dev-jwt-secret-change-me'
+    $text = $text -replace 'IPTV_API_KEY=change-me-iptv-api-key', 'IPTV_API_KEY=local-dev-iptv-key'
+    Set-Content -Path $envPath -Value $text.TrimEnd() -Encoding utf8
+  } else {
+    @(
+      'PUBLIC_BASE_URL=http://localhost:8081'
+      'CORS_ORIGIN=http://localhost:8081,http://localhost'
+      'JWT_SECRET=local-dev-jwt-secret-change-me'
+      'IPTV_API_KEY=local-dev-iptv-key'
+      'POSTGRES_PASSWORD=postgres'
+      'HTTP_PORT=8081'
+      'RTMP_PUBLISH_PORT=1936'
+      'MCR_RTMP_PORT=1936'
+    ) | Set-Content -Path $envPath -Encoding utf8
+  }
+  Show-KlOk 'Created .env for local install (from .env.example)'
+}
+
 Show-KlBanner
+
+# ── 00 Environment ───────────────────────────────────────────
+Show-KlStep '00' 'Prepare environment'
+Ensure-KlEnv
 
 # ── 01 Docker check ──────────────────────────────────────────
 Show-KlStep '01' 'Confirm Docker'
@@ -103,7 +138,7 @@ Show-KlOk 'Images built'
 # ── 03 Start ─────────────────────────────────────────────────
 Show-KlStep '03' 'Start the stack'
 Show-KlProgress 'bringing containers online'
-docker compose up -d --force-recreate nginx-rtmp frontend backend
+docker compose up -d --force-recreate postgres nginx-rtmp frontend backend
 if ($LASTEXITCODE -ne 0) {
   Show-KlFail 'Compose up failed.'
   exit $LASTEXITCODE
