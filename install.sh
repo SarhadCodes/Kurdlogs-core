@@ -1,18 +1,67 @@
 #!/bin/bash
+# KurdLogs Core — branded installer (Linux / VPS)
 set -euo pipefail
 
-GREEN='\033[0;32m'
-BLUE='\033[0;34m'
-RED='\033[0;31m'
-YELLOW='\033[1;33m'
-NC='\033[0m'
+ESC=$'\033'
+R="${ESC}[0m"
+B="${ESC}[1m"
+DIM="${ESC}[2m"
+CYAN="${ESC}[38;2;125;211;252m"
+MINT="${ESC}[38;2;134;239;172m"
+PEARL="${ESC}[38;2;226;232;240m"
+MUTED="${ESC}[38;2;148;163;184m"
+AMBER="${ESC}[38;2;253;224;71m"
+LINE="${ESC}[38;2;51;65;85m"
+OK="${ESC}[38;2;74;222;128m"
+ERR="${ESC}[38;2;248;113;113m"
+PROMPT="${ESC}[38;2;167;139;250m"
 
-echo -e "${BLUE}Starting KurdLogs Core installation...${NC}"
+cd "$(dirname "$0")"
 
-if [ "$EUID" -ne 0 ]; then
-  echo -e "${RED}Please run as root (use sudo)${NC}"
-  exit 1
-fi
+banner() {
+  clear 2>/dev/null || true
+  echo ""
+  echo -e "${CYAN}          ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄${R}"
+  echo -e "${CYAN}        ▐█▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█▌${R}"
+  echo -e "${PEARL}${B}              K U R D L O G S   C O R E${R}"
+  echo -e "${MUTED}           self-hosted broadcast control panel${R}"
+  echo -e "${CYAN}        ▐█▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█▌${R}"
+  echo -e "${CYAN}          ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀${R}"
+  echo ""
+  echo -e "${LINE}  ┌─ session ─────────────────────────────────────────┐${R}"
+  echo -e "${LINE}  │${R}  ${MINT}●${R} live install   ${MUTED}│${R}  docker + apt   ${MUTED}│${R}  VPS / server  ${LINE}│${R}"
+  echo -e "${LINE}  └───────────────────────────────────────────────────┘${R}"
+  echo ""
+}
+
+step() {
+  local num="$1" title="$2"
+  echo ""
+  echo -e "${LINE}╭──────────────────────────────────────────────────────────────╮${R}"
+  echo -e "${LINE}│${R}  ${AMBER}${B}${num}${R}  ${PEARL}${B}${title}${R}"
+  echo -e "${LINE}╰──────────────────────────────────────────────────────────────╯${R}"
+  echo ""
+}
+
+ok()   { echo -e "  ${OK}${B}✓${R}  ${PEARL}$1${R}"; }
+fail() { echo -e "  ${ERR}${B}✗${R}  ${PEARL}$1${R}"; }
+info() { echo -e "  ${MUTED}→${R}  $1"; }
+cmd()  { echo -e "${PROMPT}${B}❯${R} ${MUTED}kurdlogs${R} ${DIM}›${R} $1"; }
+
+progress() {
+  local label="$1"
+  echo -e "${MUTED}  ${label}${R}"
+  local i
+  for i in $(seq 1 24); do
+    local fill empty pct
+    fill=$(printf '█%.0s' $(seq 1 "$i"))
+    empty=$(printf '░%.0s' $(seq 1 $((24 - i))) 2>/dev/null || true)
+    pct=$((100 * i / 24))
+    printf "\r  ${CYAN}%s${DIM}%s${R}  ${MUTED}%s%%%R " "$fill" "$empty" "$pct"
+    sleep 0.02
+  done
+  echo ""
+}
 
 detect_public_ip() {
   curl -fsS --max-time 8 ifconfig.me 2>/dev/null \
@@ -29,31 +78,45 @@ rand_hex() {
   fi
 }
 
+banner
+
+if [ "${EUID:-$(id -u)}" -ne 0 ]; then
+  fail "Please run as root (use sudo ./install.sh)"
+  exit 1
+fi
+
 PUBLIC_IP="$(detect_public_ip)"
 HTTP_PORT="${HTTP_PORT:-8081}"
 
-echo -e "${GREEN}1. Updating system...${NC}"
+step "01" "Update system"
+cmd "apt-get update && apt-get upgrade"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get upgrade -y -qq
+ok "System packages refreshed"
 
-echo -e "${GREEN}2. Installing dependencies...${NC}"
+step "02" "Install dependencies"
+cmd "apt-get install curl ca-certificates ffmpeg"
 apt-get install -y -qq curl ca-certificates ffmpeg
+ok "Dependencies installed"
 
-echo -e "${GREEN}3. Installing Docker...${NC}"
+step "03" "Install Docker"
+cmd "docker --version || get.docker.com"
 if ! command -v docker >/dev/null 2>&1; then
+  progress "installing Docker Engine"
   curl -fsSL https://get.docker.com -o get-docker.sh
   sh get-docker.sh
   rm -f get-docker.sh
 else
-  echo "Docker already installed."
+  info "$(docker --version)"
 fi
-
 if ! docker compose version >/dev/null 2>&1; then
   apt-get install -y -qq docker-compose-plugin
 fi
+info "$(docker compose version)"
+ok "Docker runtime ready"
 
-echo -e "${GREEN}4. Configuring environment...${NC}"
+step "04" "Configure environment"
 if [ ! -f .env ]; then
   cat > .env <<EOF
 PUBLIC_BASE_URL=http://${PUBLIC_IP}
@@ -65,14 +128,14 @@ RTMP_PORT=1935
 TOKEN_OVERLAP_SECONDS=120
 TOKEN_REFRESH_AHEAD_SECONDS=90
 EOF
-  echo -e "${YELLOW}Created .env with auto-generated secrets.${NC}"
+  info "Created .env with auto-generated secrets"
 else
-  echo ".env already exists — keeping your settings."
-  # Ensure PUBLIC_BASE_URL is set if missing
+  info ".env already exists — keeping your settings"
   if ! grep -q '^PUBLIC_BASE_URL=' .env; then
     echo "PUBLIC_BASE_URL=http://${PUBLIC_IP}" >> .env
   fi
 fi
+ok "Environment ready"
 
 # shellcheck disable=SC1091
 set -a
@@ -82,23 +145,27 @@ set +a
 BASE_URL="${PUBLIC_BASE_URL:-http://${PUBLIC_IP}}"
 HOST_PORT="${HTTP_PORT:-8081}"
 
-echo -e "${GREEN}5. Building Docker containers (this may take several minutes)...${NC}"
+step "05" "Build containers"
+cmd "docker compose build"
+progress "building images (this can take a few minutes)"
 docker compose build
+ok "Images built"
 
-echo -e "${GREEN}6. Starting services...${NC}"
+step "06" "Start services"
+cmd "docker compose up -d"
+progress "bringing stack online"
 docker compose up -d
+ok "Services started"
 
-echo -e "${BLUE}=======================================${NC}"
-echo -e "${GREEN}KurdLogs Core installed successfully!${NC}"
+echo ""
+echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"
+echo -e "${PEARL}${B}   KURDLOGS CORE  ·  INSTALL COMPLETE${R}"
 if [ "$HOST_PORT" = "80" ]; then
-  echo -e "Dashboard: ${BASE_URL}"
+  echo -e "${MUTED}   open  →  ${BASE_URL}${R}"
 else
-  echo -e "Dashboard: ${BASE_URL%/*}:${HOST_PORT}  (port ${HOST_PORT})"
+  echo -e "${MUTED}   open  →  ${BASE_URL%/*}:${HOST_PORT}${R}"
 fi
-echo -e "Login: admin / admin123"
-echo -e ""
-echo -e "Useful commands:"
-echo -e "  docker compose ps"
-echo -e "  docker compose logs -f backend"
-echo -e "  ./deploy-vps.sh   (rebuild after updates)"
-echo -e "${BLUE}=======================================${NC}"
+echo -e "${MUTED}   login →  admin / admin123${R}"
+echo -e "${MUTED}   tip   →  docker compose ps · docker compose logs -f backend${R}"
+echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"
+echo ""
