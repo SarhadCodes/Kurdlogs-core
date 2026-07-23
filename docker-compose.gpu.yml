@@ -1,0 +1,28 @@
+# GPU encoding overlay — ONLY if the VPS has an NVIDIA GPU + nvidia-container-toolkit.
+# Without a GPU, do NOT use this file — use: docker compose up -d (CPU encoding, FFMPEG_ENCODER_MODE=cpu)
+#
+# GPU encoding overlay — use on VPS with NVIDIA GPU + nvidia-container-toolkit
+#
+#   sudo apt install -y nvidia-container-toolkit
+#   sudo nvidia-ctk runtime configure --runtime=docker
+#   sudo systemctl restart docker
+#
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml build backend
+#   docker compose -f docker-compose.yml -f docker-compose.gpu.yml up -d --force-recreate backend
+#
+services:
+  backend:
+    build:
+      dockerfile: docker/backend.Dockerfile.gpu
+    environment:
+      FFMPEG_ENCODER_MODE: ${FFMPEG_ENCODER_MODE:-auto}
+      NVENC_PRESET: ${NVENC_PRESET:-p4}
+      NVIDIA_VISIBLE_DEVICES: all
+      NVIDIA_DRIVER_CAPABILITIES: compute,video,utility
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu, video, compute, utility]

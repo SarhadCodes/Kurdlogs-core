@@ -1,0 +1,500 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  SUPERVISOR
+  OPERATOR
+  VIEWER
+}
+
+enum SourceType {
+  M3U8
+  MP4
+  RTMP
+  MPEGTS
+  SRT
+  UDP
+  HTTP
+}
+
+enum OutputType {
+  HLS
+  DASH
+}
+
+enum ChannelStatus {
+  OFFLINE
+  ONLINE
+  ERROR
+  STARTING
+  STOPPING
+}
+
+enum Resolution {
+  RES_1080P
+  RES_720P
+  RES_480P
+}
+
+enum OverlayType {
+  LOGO
+  SCROLLING_TEXT
+  LIVE_BADGE
+  WATERMARK
+  CLOCK
+}
+
+enum LogLevel {
+  INFO
+  WARN
+  ERROR
+  DEBUG
+}
+
+enum BoostNodeStatus {
+  PENDING
+  ONLINE
+  OFFLINE
+  ERROR
+}
+
+enum PlaylistItemStatus {
+  PROCESSING
+  READY
+  FAILED
+}
+
+enum ProcessingJobStatus {
+  QUEUED
+  PROCESSING
+  COMPLETED
+  FAILED
+}
+
+enum ProcessingJobType {
+  INGEST
+  REBRAND
+  RETRY
+}
+
+enum AppLogCategory {
+  UPLOAD
+  BRANDING
+  FFMPEG
+  PLAYLIST
+  CHANNEL
+  BENCHMARK
+  SYSTEM
+  BLUEPRINT
+}
+
+enum BlueprintBlockType {
+  MOVIE
+  PROMO
+  INTRO
+  STATION_ID
+  MUSIC
+  CARTOON
+  SCHEDULE
+  LOOP
+}
+
+enum BlueprintSelectionMode {
+  RANDOM
+  SEQUENTIAL
+}
+
+enum BlueprintStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum McrSourceType {
+  BLUEPRINT
+  PLAYLIST
+  RTMP
+  RTMP_INGEST
+  SRT
+  RTSP
+  HLS
+  MPEGTS
+  UDP
+  NDI
+  EMERGENCY
+}
+
+enum McrRoutingMode {
+  AUTOMATION
+  MANUAL
+}
+
+enum ControlRoomSource {
+  BLUEPRINT
+  LIVE
+  STATION_ID
+  LOOP
+  EMERGENCY
+}
+
+enum HybridActiveSource {
+  BLUEPRINT
+  LIVE
+  TRANSITION
+}
+
+enum HybridNormalizationMode {
+  OFF
+  ON
+  AUTO
+}
+
+model User {
+  id                 String   @id @default(uuid())
+  username           String   @unique
+  email              String?  @unique
+  passwordHash       String
+  role               Role     @default(ADMIN)
+  displayName        String?
+  avatarUrl          String?
+  mustChangePassword Boolean  @default(true)
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+}
+
+model BrandProfile {
+  id            String   @id @default(uuid())
+  name          String   @unique
+  logoPath      String?
+  x             Int      @default(20)
+  y             Int      @default(20)
+  width         Int      @default(200)
+  height        Int      @default(200)
+  opacity       Float    @default(1)
+  enabled       Boolean  @default(true)
+  watermarkPath String?
+  bugPath       String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  channels  Channel[]
+  playlists Playlist[]
+}
+
+model Channel {
+  id                   String              @id @default(uuid())
+  name                 String
+  slug                 String              @unique
+  sourceUrl            String
+  sourceType           SourceType
+  status               ChannelStatus       @default(OFFLINE)
+  transcodingProfileId String?
+  transcodingProfile   TranscodingProfile? @relation(fields: [transcodingProfileId], references: [id])
+  brandProfileId       String?
+  brandProfile         BrandProfile?       @relation(fields: [brandProfileId], references: [id])
+  autoReconnect        Boolean             @default(true)
+  maxReconnectAttempts Int                 @default(10)
+  reconnectDelay       Int                 @default(5000)
+  customFfmpegArgs     String?
+  pid                  Int?
+  outputType           OutputType          @default(HLS)
+  enableDvr            Boolean             @default(false)
+  dvrWindowMinutes     Int                 @default(1440)
+  isPlaylistChannel    Boolean             @default(false)
+  playlistId           String?
+  playlist             Playlist?           @relation(fields: [playlistId], references: [id])
+  useBlueprint         Boolean             @default(false)
+  blueprintId          String?             @unique
+  blueprint            ChannelBlueprint?   @relation(fields: [blueprintId], references: [id])
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+
+  overlays    Overlay[]
+  tokens      Token[]
+  streamLogs  StreamLog[]
+  streamStats StreamStats[]
+  mcrRouter    McrRouterState?
+  mcrSources   McrSource[]     @relation("McrSourceRefChannel")
+  controlRoom  ControlRoomState?
+  hybrid       HybridChannelState?
+}
+
+model HybridChannelState {
+  channelId              String                  @id
+  channel                Channel                 @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  activeSource           HybridActiveSource      @default(BLUEPRINT)
+  liveFeedUrl            String?
+  stationIdVideoPath     String?
+  stationIdPlaylistId    String?
+  stationIdPlaylistItemId String?
+  blueprintNormalization HybridNormalizationMode @default(OFF)
+  stationNormalization   HybridNormalizationMode @default(OFF)
+  liveNormalization      HybridNormalizationMode @default(AUTO)
+  transitionInProgress   Boolean                 @default(false)
+  decoderPid             Int?
+  lastSwitchAt           DateTime?
+  updatedAt              DateTime                @updatedAt
+}
+
+model ControlRoomState {
+  channelId               String              @id
+  channel                 Channel             @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  programSource           ControlRoomSource   @default(BLUEPRINT)
+  previewSource           ControlRoomSource   @default(LIVE)
+  liveStreamKey           String
+  liveActive              Boolean             @default(false)
+  liveVideoReady          Boolean             @default(false)
+  livePid                 Int?
+  programGeneration       Int                 @default(0)
+  lastTakeAt              DateTime?
+  programEncoderPid       Int?
+  programZmqPort          Int?
+  outputStartedAt         DateTime?
+  transitionInProgress    Boolean             @default(false)
+  transitionTargetSource  ControlRoomSource?
+  useStationIdTransitions Boolean             @default(false)
+  obsDisconnectFallback   ControlRoomSource   @default(LOOP)
+  loopVideoPath           String?
+  stationIdEnterPath      String?
+  stationIdExitPath       String?
+  emergencyVideoPath      String?
+  outputWidth             Int                 @default(1920)
+  outputHeight            Int                 @default(1080)
+  outputFps               Int                 @default(24)
+  updatedAt               DateTime            @updatedAt
+}
+
+model TranscodingProfile {
+  id           String     @id @default(uuid())
+  name         String
+  resolution   Resolution
+  videoBitrate String
+  audioBitrate String
+  fps          Int        @default(30)
+  videoCodec   String     @default("libx264")
+  audioCodec   String     @default("aac")
+  preset       String     @default("veryfast")
+  isDefault    Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+
+  channels Channel[]
+}
+
+model Token {
+  id                        String    @id @default(uuid())
+  channelId                 String
+  channel                   Channel   @relation(fields: [channelId], references: [id])
+  token                     String    @unique
+  previousToken             String?   @unique
+  previousTokenValidUntil   DateTime?
+  expiresAt                 DateTime
+  refreshIntervalMinutes    Int       @default(30)
+  isActive                  Boolean   @default(true)
+  createdAt                 DateTime  @default(now())
+}
+
+model Playlist {
+  id             String        @id @default(uuid())
+  name           String
+  isLooping      Boolean       @default(true)
+  brandProfileId String?
+  brandProfile   BrandProfile? @relation(fields: [brandProfileId], references: [id])
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  items    PlaylistItem[]
+  channels Channel[]
+}
+
+/// Visual channel behavior definition — playlists are content sources, not the schedule.
+model ChannelBlueprint {
+  id          String          @id @default(uuid())
+  name        String
+  description String?
+  status      BlueprintStatus @default(DRAFT)
+  templateKey String?
+  blocks      Json            @default("[]")
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+
+  channel Channel?
+}
+
+model PlaylistItem {
+  id               String             @id @default(uuid())
+  playlistId       String
+  playlist         Playlist           @relation(fields: [playlistId], references: [id])
+  videoPath        String
+  sourceVideoPath  String?
+  originalFilename String
+  position         Int
+  duration         Float?
+  logoConfig       Json?
+  logoBurned       Boolean            @default(false)
+  brandApplied     Boolean            @default(false)
+  processingError  String?
+  status           PlaylistItemStatus @default(PROCESSING)
+  createdAt        DateTime           @default(now())
+
+  processingJobs ProcessingJob[]
+}
+
+model ProcessingJob {
+  id             String              @id @default(uuid())
+  type           ProcessingJobType   @default(INGEST)
+  status         ProcessingJobStatus @default(QUEUED)
+  playlistItemId String?
+  playlistItem   PlaylistItem?       @relation(fields: [playlistItemId], references: [id], onDelete: SetNull)
+  playlistId     String?
+  progressPct    Float               @default(0)
+  currentFrame   Int                 @default(0)
+  currentTimeSec Float               @default(0)
+  encodingSpeed  String?
+  etaSeconds     Int?
+  ffmpegPid      Int?
+  sourcePath     String?
+  outputPath     String?
+  mode           String?
+  errorMessage   String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+}
+
+model Overlay {
+  id        String      @id @default(uuid())
+  channelId String
+  channel   Channel     @relation(fields: [channelId], references: [id])
+  type      OverlayType
+  config    Json
+  isActive  Boolean     @default(true)
+  position  String      @default("top-right")
+  createdAt DateTime    @default(now())
+  updatedAt DateTime    @updatedAt
+}
+
+model StreamLog {
+  id        String   @id @default(uuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id])
+  level     LogLevel
+  message   String
+  timestamp DateTime @default(now())
+}
+
+model StreamStats {
+  id        String   @id @default(uuid())
+  channelId String
+  channel   Channel  @relation(fields: [channelId], references: [id])
+  cpu       Float    @default(0)
+  ram       Float    @default(0)
+  bitrate   Float    @default(0)
+  fps       Float    @default(0)
+  uptime    Int      @default(0)
+  frames    Int      @default(0)
+  speed     String   @default("0x")
+  timestamp DateTime @default(now())
+}
+
+model AppLog {
+  id        String         @id @default(uuid())
+  category  AppLogCategory
+  level     LogLevel       @default(INFO)
+  message   String
+  meta      Json?
+  createdAt DateTime       @default(now())
+}
+
+/// Remote VPS worker for distributed encoding and streaming (Boost).
+model BoostNode {
+  id             String          @id @default(uuid())
+  name           String
+  host           String
+  port           Int             @default(8443)
+  encode         Boolean         @default(true)
+  stream         Boolean         @default(true)
+  maxChannels    Int             @default(4)
+  status         BoostNodeStatus @default(PENDING)
+  secretKey      String          @unique
+  notes          String?
+  lastSeenAt     DateTime?
+  workerHostname String?
+  workerVersion  String?
+  workerCpu      Float?
+  workerRam      Float?
+  activeChannels Int             @default(0)
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+}
+
+/// Master Control Room — program routing state per output channel.
+model McrRouterState {
+  channelId            String         @id
+  channel              Channel        @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  programSourceId      String?
+  previewSourceId      String?
+  automationSourceId   String?
+  routingMode          McrRoutingMode @default(AUTOMATION)
+  enabled              Boolean        @default(false)
+  relayPid             Int?
+  // v2 switcher: permanent program encoder PID (replaces bus relay for switching)
+  switcherEncoderPid   Int?
+  switcherZmqPort      Int?
+  programInputSlot     Int            @default(0)
+  previewInputSlot     Int            @default(0)
+  architectureVersion  String         @default("v2-switcher")
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
+  sources              McrSource[]
+}
+
+model McrSource {
+  id               String         @id @default(uuid())
+  routerChannelId  String
+  router           McrRouterState @relation(fields: [routerChannelId], references: [channelId], onDelete: Cascade)
+  label            String
+  sourceType       McrSourceType
+  refChannelId     String?
+  refChannel       Channel?       @relation("McrSourceRefChannel", fields: [refChannelId], references: [id], onDelete: SetNull)
+  inputUrl         String?
+  streamKey        String?
+  isAutoDiscover   Boolean        @default(false)
+  enabled          Boolean        @default(true)
+  sortOrder        Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+
+  @@unique([routerChannelId, streamKey])
+}
+
+/// Active RTMP publishers on nginx-rtmp (OBS / vMix ingest).
+model McrIngestPublisher {
+  streamKey  String   @id
+  label      String?
+  clientIp   String?
+  active     Boolean  @default(true)
+  bitrate    Float?
+  fps        Float?
+  width      Int?
+  height     Int?
+  hasAudio   Boolean?
+  startedAt  DateTime @default(now())
+  lastSeenAt DateTime @updatedAt
+}
+
+model McrAuditLog {
+  id         String   @id @default(uuid())
+  channelId  String
+  action     String
+  operatorId String?
+  operator   String?
+  details    Json?
+  createdAt  DateTime @default(now())
+}

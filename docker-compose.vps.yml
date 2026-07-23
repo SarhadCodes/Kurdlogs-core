@@ -1,0 +1,6 @@
+# Optional override when host port 80 is taken (Flussonic, nginx, etc.)
+# Usage: docker compose -f docker-compose.yml -f docker-compose.vps.yml up -d
+services:
+  frontend:
+    ports:
+      - "8081:80"

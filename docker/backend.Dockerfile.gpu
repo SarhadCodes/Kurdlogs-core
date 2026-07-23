@@ -1,0 +1,27 @@
+# Backend with FFmpeg + NVIDIA NVENC (requires nvidia-container-toolkit on the host)
+FROM jrottenberg/ffmpeg:6.1-nvidia AS ffmpeg-gpu
+
+FROM node:20-bookworm-slim
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ openssl ca-certificates fontconfig fonts-dejavu-core \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY --from=ffmpeg-gpu /usr/local/bin/ffmpeg /usr/local/bin/ffmpeg
+COPY --from=ffmpeg-gpu /usr/local/bin/ffprobe /usr/local/bin/ffprobe
+COPY --from=ffmpeg-gpu /usr/local/lib/ /usr/local/lib/
+
+ENV LD_LIBRARY_PATH=/usr/local/lib:/usr/local/nvidia/lib:/usr/local/nvidia/lib64:${LD_LIBRARY_PATH}
+
+WORKDIR /app
+
+COPY backend/package*.json ./
+RUN npm install
+
+COPY backend/ .
+RUN npx prisma generate
+RUN npm run build
+
+EXPOSE 3001
+
+CMD ["sh", "-c", "for i in 1 2 3 4 5 6 7 8 9 10; do npx prisma db push --accept-data-loss && break; echo \"Waiting for database...\"; sleep 3; done && node dist/seed.js && exec node dist/index.js"]
