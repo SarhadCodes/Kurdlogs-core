@@ -1,3 +1,7 @@
+# Force a stable project name so folder renames (Kurdlogs-core vs Kurdlogs_core)
+# do not create a second network on the same subnet (172.30.7.0/24).
+name: kurdlogs_core
+
 services:
   postgres:
     image: postgres:15-alpine
@@ -104,6 +108,7 @@ volumes:
 
 networks:
   kurdlogs_net:
+    name: kurdlogs_net
     driver: bridge
     ipam:
       config:

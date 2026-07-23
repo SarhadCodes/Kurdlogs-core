@@ -8,3 +8,8 @@ streams/
 logs/
 .DS_Store
 *.log
+*.zip
+Kurdlogs-core/
+website/tmp-tutorial/
+website/node_modules/
+website/dist/

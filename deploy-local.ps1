@@ -3,6 +3,7 @@
 
 $ErrorActionPreference = 'Stop'
 Set-Location $PSScriptRoot
+$env:COMPOSE_PROJECT_NAME = 'kurdlogs_core'
 try { [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new() } catch {}
 
 $e = [char]27
