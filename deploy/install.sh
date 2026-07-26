@@ -105,7 +105,7 @@ step "03" "Download release package (no source)"
 cmd "mkdir -p ${INSTALL_DIR}"
 mkdir -p "${INSTALL_DIR}"
 cd "${INSTALL_DIR}"
-curl -fsSL "${DIST_BASE}/dist/docker-compose.yml" -o docker-compose.yml
+curl -fsSL "${DIST_BASE}/release/docker-compose.yml" -o docker-compose.yml
 ok "Compose file installed to ${INSTALL_DIR}"
 
 step "04" "Configure environment"

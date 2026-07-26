@@ -40,7 +40,7 @@ Set-Location $InstallDir
 Write-Ok $InstallDir
 
 Write-Step '02' "Download release package (no source)"
-$composeUrl = "$DistBase/dist/docker-compose.yml"
+$composeUrl = "$DistBase/release/docker-compose.yml"
 Invoke-WebRequest -Uri $composeUrl -OutFile (Join-Path $InstallDir 'docker-compose.yml') -UseBasicParsing
 Write-Ok 'docker-compose.yml'
 
