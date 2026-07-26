@@ -78,8 +78,36 @@ KURDLOGS_IMAGE_NGINX=ghcr.io/sarhadcodes/kurdlogs-core-nginx:$ImageTag
 
 Write-Step '04' "Pull binary images"
 docker compose pull
-if ($LASTEXITCODE -ne 0) { throw 'docker compose pull failed' }
-Write-Ok 'Images downloaded'
+if ($LASTEXITCODE -ne 0) {
+  $needed = @(
+    'ghcr.io/sarhadcodes/kurdlogs-core-backend:latest',
+    'ghcr.io/sarhadcodes/kurdlogs-core-frontend:latest',
+    'ghcr.io/sarhadcodes/kurdlogs-core-nginx:latest'
+  )
+  $missing = @()
+  foreach ($img in $needed) {
+    docker image inspect $img 2>$null | Out-Null
+    if ($LASTEXITCODE -ne 0) { $missing += $img }
+  }
+  if ($missing.Count -gt 0) {
+    throw @"
+docker compose pull failed (registry denied / images missing).
+
+The public release images are not available yet on GHCR.
+Owner must publish them once:
+
+  1) gh auth login -s write:packages
+  2) Open GitHub → Actions → Publish release images → Run workflow
+  3) Package settings → make each kurdlogs-core-* package Public
+
+Missing:
+$($missing -join "`n")
+"@
+  }
+  Write-Host "  ! Registry pull failed, but local images were found — continuing." -ForegroundColor Yellow
+} else {
+  Write-Ok 'Images downloaded'
+}
 
 Write-Step '05' "Start KurdLogs Core"
 docker compose up -d

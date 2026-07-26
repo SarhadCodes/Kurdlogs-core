@@ -132,8 +132,26 @@ ok "Environment ready"
 
 step "05" "Pull binary images"
 cmd "docker compose pull"
-docker compose pull
-ok "Images downloaded"
+if ! docker compose pull; then
+  missing=0
+  for img in \
+    "ghcr.io/sarhadcodes/kurdlogs-core-backend:${IMAGE_TAG}" \
+    "ghcr.io/sarhadcodes/kurdlogs-core-frontend:${IMAGE_TAG}" \
+    "ghcr.io/sarhadcodes/kurdlogs-core-nginx:${IMAGE_TAG}"
+  do
+    if ! docker image inspect "$img" >/dev/null 2>&1; then
+      fail "Missing image: $img"
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    fail "Public GHCR images are not available yet. Owner must publish them (Actions → Publish release images) and set packages to Public."
+    exit 1
+  fi
+  info "Registry pull failed, but local images were found — continuing"
+else
+  ok "Images downloaded"
+fi
 
 step "06" "Start KurdLogs Core"
 cmd "docker compose up -d"
