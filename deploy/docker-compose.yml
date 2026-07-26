@@ -1,5 +1,5 @@
-# Force a stable project name so folder renames (Kurdlogs-core vs Kurdlogs_core)
-# do not create a second network on the same subnet (172.30.7.0/24).
+# KurdLogs Core — customer distribution (no source, images only)
+# Force a stable project name so folder renames do not create a second network.
 name: kurdlogs_core
 
 services:
@@ -21,13 +21,9 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: .
-      dockerfile: docker/backend.Dockerfile
+    image: ${KURDLOGS_IMAGE_BACKEND:-ghcr.io/sarhadcodes/kurdlogs-core-backend:latest}
     env_file:
       - path: .env
-        required: false
-      - path: .env.local
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/kurdlogs
@@ -59,16 +55,11 @@ services:
     restart: unless-stopped
     networks:
       kurdlogs_net:
-        # Pinned IP so nginx-rtmp's on_publish callback target stays valid across
-        # backend recreations (the RTMP module caches the resolved IP at startup).
         ipv4_address: 172.30.7.10
 
   frontend:
-    build:
-      context: .
-      dockerfile: docker/frontend.Dockerfile
+    image: ${KURDLOGS_IMAGE_FRONTEND:-ghcr.io/sarhadcodes/kurdlogs-core-frontend:latest}
     ports:
-      # Default 8081 — port 80 is often taken by Flussonic/nginx on VPS hosts
       - "${HTTP_PORT:-8081}:80"
     depends_on:
       - backend
@@ -77,13 +68,10 @@ services:
       - kurdlogs_net
 
   nginx-rtmp:
-    build:
-      context: ./nginx
-      dockerfile: Dockerfile
+    image: ${KURDLOGS_IMAGE_NGINX:-ghcr.io/sarhadcodes/kurdlogs-core-nginx:latest}
     volumes:
       - streams_data:/var/streams
     ports:
-      # KurdLogs MCR RTMP — port 1936 (Flussonic keeps host 1935)
       - "${RTMP_PUBLISH_PORT:-1936}:${MCR_RTMP_PORT:-1936}"
     restart: unless-stopped
     networks:

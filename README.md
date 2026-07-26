@@ -10,6 +10,27 @@
 
 A lightweight, modern, self-hosted IPTV management panel for restreaming, transcoding, and 24/7 automated TV channels.
 
+## Install (no source code)
+
+Users install **prebuilt images** only — like an APK. The GitHub source repository stays private.
+
+### Linux / VPS
+
+```bash
+curl -fsSL https://kurdlogs-core.sarhadyt.workers.dev/install.sh | sudo bash
+```
+
+### Windows (PowerShell)
+
+```powershell
+irm https://kurdlogs-core.sarhadyt.workers.dev/install.ps1 | iex
+```
+
+This downloads a compose file + pulls binary images from GHCR. It never clones this repository.
+
+Default panel: `http://localhost:8081`  
+Login: `admin` / `admin123`
+
 ## Features
 
 - **Modern Dashboard**: Dark theme, glassmorphism UI with live stream previews and stats.
@@ -21,25 +42,15 @@ A lightweight, modern, self-hosted IPTV management panel for restreaming, transc
 - **Monitoring**: Real-time CPU, RAM, bitrate, and FPS tracking via WebSockets.
 - **Auto-Reconnect**: Automatically restart streams on crash or source failure.
 
-## Architecture
+## Owner / developer notes
 
-```mermaid
-graph TB
-    UI["Frontend (React)"] <--> API["Backend API"]
-    UI <--> WS["WebSockets"]
-    API <--> DB["PostgreSQL"]
-    API --> FFM["FFmpeg"]
-    FFM -->|HLS| NGINX["NGINX RTMP"]
-    UI -->|Playback| NGINX
-```
+This private repository is for maintainers. To publish customer images:
 
-## Quick Start (Docker)
+1. Push a version tag (`v1.0.0`) or run **Actions → Publish release images**.
+2. In GitHub → Packages, set each `kurdlogs-core-*` package visibility to **Public**.
+3. Users install via the public one-liners above.
 
-1. Clone the repository
-2. Run the installation script:
-```bash
-sudo ./install.sh
-```
+Local development still uses `docker compose build` from this repo.
 
 ## Environment Variables
 
