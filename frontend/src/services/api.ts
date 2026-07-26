@@ -17,23 +17,15 @@ import type { ChannelPlayUrlsData } from '../utils/channelOutputs';
 const api = axios.create({
   baseURL: '/api',
   timeout: 30_000,
-});
-
-api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('auth_token');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
-  }
-  return config;
+  withCredentials: true,
 });
 
 api.interceptors.response.use(
   (response) => response.data,
   (error) => {
     if (error.response?.status === 401) {
-      localStorage.removeItem('auth_token');
       if (window.location.pathname !== '/login') {
-         window.location.href = '/login';
+        window.location.href = '/login';
       }
     }
     const detail =
@@ -41,13 +33,36 @@ api.interceptors.response.use(
       error.response?.data?.message ||
       error.message ||
       'Request failed';
+    const code = error.response?.data?.code;
+    if (code) {
+      return Promise.reject({ message: detail, code, status: error.response?.status });
+    }
     return Promise.reject(detail);
   }
 );
 
 export const authApi = {
-  login: (data: any) =>
-    api.post<any, ApiResponse<{ token: string; user: User }>>('/auth/login', data, { timeout: 45_000 }),
+  login: (data: { username: string; password: string }) =>
+    api.post<
+      any,
+      ApiResponse<{
+        mfaRequired?: boolean;
+        mfaToken?: string;
+        user?: User;
+        requiresPasswordChange?: boolean;
+        requiresMfaSetup?: boolean;
+      }>
+    >('/auth/login', data, { timeout: 45_000 }),
+  verifyMfa: (data: { mfaToken: string; code: string }) =>
+    api.post<
+      any,
+      ApiResponse<{
+        user: User;
+        requiresPasswordChange?: boolean;
+        requiresMfaSetup?: boolean;
+      }>
+    >('/auth/login/mfa', data, { timeout: 45_000 }),
+  logout: () => api.post<any, ApiResponse>('/auth/logout'),
   getMe: () => api.get<any, ApiResponse<User>>('/auth/me'),
   updateProfile: (data: { displayName: string }) =>
     api.put<any, ApiResponse<User>>('/auth/profile', data),
@@ -55,7 +70,20 @@ export const authApi = {
     api.post<any, ApiResponse<User>>('/auth/avatar', data, {
       headers: { 'Content-Type': 'multipart/form-data' },
     }),
-  changePassword: (data: any) => api.put<any, ApiResponse>('/auth/change-password', data),
+  changePassword: (data: { currentPassword: string; newPassword: string }) =>
+    api.put<any, ApiResponse<User>>('/auth/change-password', data),
+  setupMfa: () =>
+    api.post<any, ApiResponse<{ secret: string; otpauthUrl: string; qrDataUrl: string }>>(
+      '/auth/mfa/setup'
+    ),
+  enableMfa: (code: string) =>
+    api.post<any, ApiResponse<{ user: User; backupCodes: string[] }>>('/auth/mfa/enable', {
+      code,
+    }),
+  disableMfa: (data: { password: string; code: string }) =>
+    api.post<any, ApiResponse<User>>('/auth/mfa/disable', data),
+  regenerateBackupCodes: (data: { password: string; code: string }) =>
+    api.post<any, ApiResponse<{ backupCodes: string[] }>>('/auth/mfa/backup-codes/regenerate', data),
 };
 
 export const channelApi = {

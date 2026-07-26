@@ -20,6 +20,7 @@ import Layout from '../components/Layout';
 import PageHeader from '../components/PageHeader';
 import InstallAppCard from '../components/InstallAppCard';
 import LoadingSpinner from '../components/LoadingSpinner';
+import MfaBackupCodesPanel from '../components/MfaBackupCodesPanel';
 import toast from 'react-hot-toast';
 import type { SystemStats } from '../types';
 import { resolveAvatarUrl, userDisplayName, userInitials } from '../utils/userProfile';
@@ -28,7 +29,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 
-const MIN_PASSWORD_LENGTH = 6;
+const MIN_PASSWORD_LENGTH = 12;
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -136,6 +137,18 @@ export default function SettingsPage() {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const [mfaSecret, setMfaSecret] = useState<string | null>(null);
+  const [mfaQr, setMfaQr] = useState<string | null>(null);
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaBusy, setMfaBusy] = useState(false);
+  const [backupCodes, setBackupCodes] = useState<string[] | null>(null);
+  const [disablePassword, setDisablePassword] = useState('');
+  const [disableCode, setDisableCode] = useState('');
+  const [regenPassword, setRegenPassword] = useState('');
+  const [regenCode, setRegenCode] = useState('');
+  const [showRegenForm, setShowRegenForm] = useState(false);
+  const [regenBusy, setRegenBusy] = useState(false);
+
   useEffect(() => {
     setDisplayName(user?.displayName || '');
   }, [user?.displayName]);
@@ -219,6 +232,14 @@ export default function SettingsPage() {
       toast.error(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
       return;
     }
+    if (!/[a-z]/.test(newPassword) || !/[A-Z]/.test(newPassword) || !/[0-9]/.test(newPassword)) {
+      toast.error('Password must include uppercase, lowercase, and a number');
+      return;
+    }
+    if (user?.username && newPassword.toLowerCase().includes(user.username.toLowerCase())) {
+      toast.error('Password must not contain your username');
+      return;
+    }
     if (newPassword !== confirmPassword) {
       toast.error('New passwords do not match');
       return;
@@ -230,16 +251,97 @@ export default function SettingsPage() {
 
     setIsSubmitting(true);
     try {
-      await authApi.changePassword({ currentPassword, newPassword });
+      const res = await authApi.changePassword({ currentPassword, newPassword });
+      if (res.data) setUser(res.data);
       toast.success('Password updated successfully');
       setCurrentPassword('');
       setNewPassword('');
       setConfirmPassword('');
       await checkAuth();
     } catch (err: any) {
-      toast.error(err?.error || err?.message || 'Failed to change password');
+      toast.error(err?.error || err?.message || (typeof err === 'string' ? err : 'Failed to change password'));
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const handleMfaSetup = async () => {
+    setMfaBusy(true);
+    try {
+      const res = await authApi.setupMfa();
+      setMfaSecret(res.data?.secret || null);
+      setMfaQr(res.data?.qrDataUrl || null);
+      setBackupCodes(null);
+      toast.success('Scan the QR code with your authenticator app');
+    } catch (err: any) {
+      toast.error(err?.message || (typeof err === 'string' ? err : 'Failed to start MFA setup'));
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleMfaEnable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!mfaCode.trim()) {
+      toast.error('Enter the authenticator code');
+      return;
+    }
+    setMfaBusy(true);
+    try {
+      const res = await authApi.enableMfa(mfaCode.trim());
+      if (res.data?.user) setUser(res.data.user);
+      setBackupCodes(res.data?.backupCodes || null);
+      setMfaCode('');
+      setMfaSecret(null);
+      setMfaQr(null);
+      toast.success('MFA enabled');
+      await checkAuth();
+    } catch (err: any) {
+      toast.error(err?.message || (typeof err === 'string' ? err : 'Invalid code'));
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleMfaDisable = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setMfaBusy(true);
+    try {
+      const res = await authApi.disableMfa({ password: disablePassword, code: disableCode });
+      if (res.data) setUser(res.data);
+      setDisablePassword('');
+      setDisableCode('');
+      setBackupCodes(null);
+      toast.success('MFA disabled');
+      await checkAuth();
+    } catch (err: any) {
+      toast.error(err?.message || (typeof err === 'string' ? err : 'Failed to disable MFA'));
+    } finally {
+      setMfaBusy(false);
+    }
+  };
+
+  const handleRegenerateBackupCodes = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!regenPassword.trim() || !regenCode.trim()) {
+      toast.error('Enter your password and authenticator code');
+      return;
+    }
+    setRegenBusy(true);
+    try {
+      const res = await authApi.regenerateBackupCodes({
+        password: regenPassword,
+        code: regenCode.trim(),
+      });
+      setBackupCodes(res.data?.backupCodes || null);
+      setRegenPassword('');
+      setRegenCode('');
+      setShowRegenForm(false);
+      toast.success('New backup codes generated — previous codes no longer work');
+    } catch (err: any) {
+      toast.error(err?.message || (typeof err === 'string' ? err : 'Failed to regenerate codes'));
+    } finally {
+      setRegenBusy(false);
     }
   };
 
@@ -328,7 +430,12 @@ export default function SettingsPage() {
 
                     {user?.mustChangePassword && (
                       <p className="text-xs text-amber-300/90">
-                        Password update recommended for this account.
+                        You must change this password before using the panel.
+                      </p>
+                    )}
+                    {user?.mfaRequired && !user?.mfaEnabled && !user?.mustChangePassword && (
+                      <p className="text-xs text-amber-300/90">
+                        Multi-factor authentication is required for your role. Set it up below.
                       </p>
                     )}
 
@@ -376,7 +483,9 @@ export default function SettingsPage() {
                   show={showNew}
                   onToggleShow={() => setShowNew((v) => !v)}
                 />
-                <p className="text-xs text-zinc-500 -mt-2">Minimum {MIN_PASSWORD_LENGTH} characters</p>
+                <p className="text-xs text-zinc-500 -mt-2">
+                  Minimum {MIN_PASSWORD_LENGTH} characters with uppercase, lowercase, and a number
+                </p>
                 <PasswordField
                   id="confirm-password"
                   label="Confirm new password"
@@ -403,6 +512,157 @@ export default function SettingsPage() {
                   )}
                 </button>
               </form>
+
+              <div className="mt-8 border-t border-border pt-6 space-y-4 max-w-xl">
+                <div>
+                  <h3 className="text-sm font-semibold text-foreground">Multi-factor authentication</h3>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {user?.mfaEnabled
+                      ? 'MFA is enabled. Authenticator codes are required at sign-in.'
+                      : user?.mfaRequired
+                        ? 'Required for admin accounts. Scan a QR code with Google Authenticator, Authy, or similar.'
+                        : 'Optional for your role. Improves account security.'}
+                  </p>
+                </div>
+
+                {backupCodes && backupCodes.length > 0 && (
+                  <MfaBackupCodesPanel
+                    codes={backupCodes}
+                    username={user?.username || 'user'}
+                    onDismiss={() => setBackupCodes(null)}
+                    allowRegenerate={Boolean(user?.mfaEnabled)}
+                    regenerating={regenBusy}
+                    onRegenerate={() => {
+                      setBackupCodes(null);
+                      setShowRegenForm(true);
+                    }}
+                  />
+                )}
+
+                {showRegenForm && user?.mfaEnabled && !backupCodes && (
+                  <form
+                    onSubmit={handleRegenerateBackupCodes}
+                    className="rounded-xl border border-border bg-muted/20 px-4 py-3 space-y-3 max-w-xl"
+                  >
+                    <p className="text-xs text-muted-foreground">
+                      Confirm with your password and authenticator to generate a new set. Previous codes will stop working.
+                    </p>
+                    <PasswordField
+                      id="mfa-regen-password"
+                      label="Current password"
+                      value={regenPassword}
+                      onChange={setRegenPassword}
+                      show={showCurrent}
+                      onToggleShow={() => setShowCurrent((v) => !v)}
+                    />
+                    <div className="space-y-2">
+                      <Label htmlFor="mfa-regen-code">Authenticator code</Label>
+                      <Input
+                        id="mfa-regen-code"
+                        value={regenCode}
+                        onChange={(e) => setRegenCode(e.target.value)}
+                        placeholder="123456"
+                        autoComplete="one-time-code"
+                      />
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button type="submit" size="sm" disabled={regenBusy}>
+                        {regenBusy ? 'Generating…' : 'Generate & show codes'}
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => {
+                          setShowRegenForm(false);
+                          setRegenPassword('');
+                          setRegenCode('');
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    </div>
+                  </form>
+                )}
+
+                {!user?.mfaEnabled && (
+                  <div className="space-y-4">
+                    {!mfaQr ? (
+                      <Button type="button" onClick={handleMfaSetup} disabled={mfaBusy || Boolean(user?.mustChangePassword)}>
+                        {mfaBusy ? 'Preparing…' : 'Set up authenticator'}
+                      </Button>
+                    ) : (
+                      <form onSubmit={handleMfaEnable} className="space-y-4">
+                        {mfaQr && (
+                          <img src={mfaQr} alt="MFA QR code" className="h-44 w-44 rounded-lg border border-border bg-white p-2" />
+                        )}
+                        {mfaSecret && (
+                          <p className="text-xs text-muted-foreground break-all">
+                            Manual key: <span className="font-mono text-foreground">{mfaSecret}</span>
+                          </p>
+                        )}
+                        <div className="space-y-2">
+                          <Label htmlFor="mfa-enable-code">Authenticator code</Label>
+                          <Input
+                            id="mfa-enable-code"
+                            value={mfaCode}
+                            onChange={(e) => setMfaCode(e.target.value)}
+                            placeholder="123456"
+                            autoComplete="one-time-code"
+                          />
+                        </div>
+                        <Button type="submit" disabled={mfaBusy}>
+                          {mfaBusy ? 'Verifying…' : 'Enable MFA'}
+                        </Button>
+                      </form>
+                    )}
+                    {user?.mustChangePassword && (
+                      <p className="text-xs text-amber-300/90">Change your password first, then enable MFA.</p>
+                    )}
+                  </div>
+                )}
+
+                {user?.mfaEnabled && (
+                  <div className="space-y-5">
+                    {!backupCodes && !showRegenForm && (
+                      <div className="rounded-xl border border-border bg-muted/20 px-4 py-3 space-y-3">
+                        <p className="text-xs text-muted-foreground">
+                          Backup codes are only shown when created. Generate a new set anytime — old codes stop working.
+                        </p>
+                        <Button type="button" variant="secondary" size="sm" onClick={() => setShowRegenForm(true)}>
+                          View / regenerate backup codes
+                        </Button>
+                      </div>
+                    )}
+
+                    <form onSubmit={handleMfaDisable} className="space-y-3">
+                      <p className="text-xs text-muted-foreground">
+                        Disable only if needed. Admin roles will be asked to set MFA up again.
+                      </p>
+                      <PasswordField
+                        id="mfa-disable-password"
+                        label="Current password"
+                        value={disablePassword}
+                        onChange={setDisablePassword}
+                        show={showCurrent}
+                        onToggleShow={() => setShowCurrent((v) => !v)}
+                      />
+                      <div className="space-y-2">
+                        <Label htmlFor="mfa-disable-code">Authenticator or backup code</Label>
+                        <Input
+                          id="mfa-disable-code"
+                          value={disableCode}
+                          onChange={(e) => setDisableCode(e.target.value)}
+                          placeholder="123456"
+                        />
+                      </div>
+                      <Button type="submit" variant="destructive" disabled={mfaBusy}>
+                        {mfaBusy ? 'Disabling…' : 'Disable MFA'}
+                      </Button>
+                    </form>
+                  </div>
+                )}
+              </div>
             </SettingsCard>
           </div>
 

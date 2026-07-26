@@ -1,3 +1,4 @@
+import { randomBytes } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { TRANSCODING_PRESETS } from './config/constants';
@@ -5,32 +6,43 @@ import { logger } from './utils/logger';
 
 const prisma = new PrismaClient();
 
+function generateInitialAdminPassword(): string {
+  // Meets password policy: 12+ chars, upper, lower, digit; no weak defaults.
+  return `Kl-${randomBytes(10).toString('hex')}9A`;
+}
+
 async function main() {
   logger.info('Starting seed...');
 
-  // Create default admin user
   const adminExists = await prisma.user.findUnique({
-    where: { username: 'admin' }
+    where: { username: 'admin' },
   });
 
   if (!adminExists) {
-    const salt = await bcrypt.genSalt(10);
-    const passwordHash = await bcrypt.hash('admin123', salt);
+    const fromEnv = (process.env.ADMIN_INITIAL_PASSWORD || '').trim();
+    const password = fromEnv.length >= 12 ? fromEnv : generateInitialAdminPassword();
+    const salt = await bcrypt.genSalt(12);
+    const passwordHash = await bcrypt.hash(password, salt);
 
     await prisma.user.create({
       data: {
         username: 'admin',
         passwordHash,
         role: 'ADMIN',
-        mustChangePassword: true
-      }
+        mustChangePassword: true,
+        mfaEnabled: false,
+      },
     });
-    logger.info('Created default admin user (admin / admin123)');
+
+    logger.info('Created default admin user (username: admin)');
+    logger.info('============================================================');
+    logger.info(`INITIAL ADMIN PASSWORD: ${password}`);
+    logger.info('Sign in, then change password and enable MFA immediately.');
+    logger.info('============================================================');
   } else {
     logger.info('Admin user already exists');
   }
 
-  // Create default transcoding profiles
   const profilesCount = await prisma.transcodingProfile.count();
   if (profilesCount === 0) {
     for (const preset of TRANSCODING_PRESETS) {
@@ -41,8 +53,8 @@ async function main() {
           videoBitrate: preset.videoBitrate,
           audioBitrate: preset.audioBitrate,
           fps: preset.fps,
-          isDefault: true
-        }
+          isDefault: true,
+        },
       });
     }
     logger.info('Created default transcoding profiles');

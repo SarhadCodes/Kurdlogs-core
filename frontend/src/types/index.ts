@@ -5,6 +5,8 @@ export interface User {
   displayName?: string | null;
   avatarUrl?: string | null;
   mustChangePassword?: boolean;
+  mfaEnabled?: boolean;
+  mfaRequired?: boolean;
 }
 
 export type SourceType = 'M3U8' | 'MP4' | 'RTMP' | 'MPEGTS' | 'SRT' | 'UDP' | 'HTTP';

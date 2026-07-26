@@ -1,15 +1,27 @@
+import { randomBytes } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { logger } from '../utils/logger';
 
 const prisma = new PrismaClient();
-const password = process.argv[2] || 'admin123';
+
+function generatePassword(): string {
+  return `Kl-${randomBytes(10).toString('hex')}9A`;
+}
 
 async function main() {
-  const passwordHash = await bcrypt.hash(password, 10);
+  const password = (process.argv[2] || '').trim() || generatePassword();
+  const passwordHash = await bcrypt.hash(password, 12);
   const user = await prisma.user.upsert({
     where: { username: 'admin' },
-    update: { passwordHash, mustChangePassword: true, role: 'ADMIN' },
+    update: {
+      passwordHash,
+      mustChangePassword: true,
+      role: 'ADMIN',
+      mfaEnabled: false,
+      mfaSecret: null,
+      mfaBackupCodes: null,
+    },
     create: {
       username: 'admin',
       passwordHash,
@@ -17,7 +29,9 @@ async function main() {
       mustChangePassword: true,
     },
   });
-  logger.info(`Admin user ready: ${user.username} / ${password}`);
+  logger.info(`Admin user ready: ${user.username}`);
+  logger.info(`Password: ${password}`);
+  logger.info('Change password and enable MFA after login.');
 }
 
 main()

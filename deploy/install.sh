@@ -109,10 +109,13 @@ curl -fsSL "${DIST_BASE}/release/docker-compose.yml" -o docker-compose.yml
 ok "Compose file installed to ${INSTALL_DIR}"
 
 step "04" "Configure environment"
+ADMIN_PASSWORD_SHOWN=""
 if [ ! -f .env ]; then
+  ADMIN_PASSWORD_SHOWN="Kl-$(rand_hex 10)9A"
   cat > .env <<EOF
 PUBLIC_BASE_URL=http://${PUBLIC_IP}:${HTTP_PORT}
 JWT_SECRET=$(rand_hex 24)
+ADMIN_INITIAL_PASSWORD=${ADMIN_PASSWORD_SHOWN}
 IPTV_API_KEY=$(rand_hex 16)
 POSTGRES_PASSWORD=$(rand_hex 16)
 HTTP_PORT=${HTTP_PORT}
@@ -126,6 +129,7 @@ KURDLOGS_IMAGE_NGINX=ghcr.io/sarhadcodes/kurdlogs-core-nginx:${IMAGE_TAG}
 EOF
   info "Created .env with auto-generated secrets"
 else
+  ADMIN_PASSWORD_SHOWN="$(grep -E '^ADMIN_INITIAL_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d= -f2- || true)"
   info ".env already exists — keeping your settings"
 fi
 ok "Environment ready"
@@ -163,7 +167,12 @@ echo ""
 echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"
 echo -e "${PEARL}${B}   KURDLOGS CORE  ·  INSTALL COMPLETE${R}"
 echo -e "${MUTED}   open  →  ${BASE_URL}${R}"
-echo -e "${MUTED}   login →  admin / admin123${R}"
+if [ -n "${ADMIN_PASSWORD_SHOWN}" ]; then
+  echo -e "${MUTED}   login →  admin / ${ADMIN_PASSWORD_SHOWN}${R}"
+  echo -e "${MUTED}   note  →  change password + enable MFA in Settings after first login${R}"
+else
+  echo -e "${MUTED}   login →  admin / (see ADMIN_INITIAL_PASSWORD in .env or backend logs)${R}"
+fi
 echo -e "${MUTED}   path  →  ${INSTALL_DIR}${R}"
 echo -e "${MUTED}   tip   →  cd ${INSTALL_DIR} && docker compose logs -f backend${R}"
 echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"

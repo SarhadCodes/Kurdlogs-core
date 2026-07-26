@@ -77,19 +77,31 @@ function Ensure-KlEnv {
     return
   }
 
+  $jwt = -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
+  $adminHex = -join ((1..20) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
+  $adminPw = "Kl-${adminHex}9A"
+  $script:KlAdminPassword = $adminPw
+
   if (Test-Path $example) {
     Copy-Item $example $envPath -Force
     $text = Get-Content $envPath -Raw
     $text = $text -replace 'YOUR_VPS_IP', 'localhost'
     $text = $text -replace 'POSTGRES_PASSWORD=change-me-db-password', 'POSTGRES_PASSWORD=postgres'
-    $text = $text -replace 'JWT_SECRET=change-me-long-random-secret', 'JWT_SECRET=local-dev-jwt-secret-change-me'
+    $text = $text -replace 'JWT_SECRET=replace-with-random-64-char-secret-from-install-script', "JWT_SECRET=$jwt"
+    $text = $text -replace 'JWT_SECRET=change-me-long-random-secret', "JWT_SECRET=$jwt"
     $text = $text -replace 'IPTV_API_KEY=change-me-iptv-api-key', 'IPTV_API_KEY=local-dev-iptv-key'
+    if ($text -notmatch '(?m)^ADMIN_INITIAL_PASSWORD=') {
+      $text = $text.TrimEnd() + "`nADMIN_INITIAL_PASSWORD=$adminPw`n"
+    } else {
+      $text = $text -replace '(?m)^ADMIN_INITIAL_PASSWORD=.*$', "ADMIN_INITIAL_PASSWORD=$adminPw"
+    }
     Set-Content -Path $envPath -Value $text.TrimEnd() -Encoding utf8
   } else {
     @(
       'PUBLIC_BASE_URL=http://localhost:8081'
       'CORS_ORIGIN=http://localhost:8081,http://localhost'
-      'JWT_SECRET=local-dev-jwt-secret-change-me'
+      "JWT_SECRET=$jwt"
+      "ADMIN_INITIAL_PASSWORD=$adminPw"
       'IPTV_API_KEY=local-dev-iptv-key'
       'POSTGRES_PASSWORD=postgres'
       'HTTP_PORT=8081'
@@ -172,12 +184,22 @@ docker compose ps frontend backend nginx-rtmp
 Write-KlBlank
 Show-KlOk "Panel URL  http://localhost:$port"
 
+$loginHint = 'admin / (see ADMIN_INITIAL_PASSWORD in .env)'
+if (Test-Path (Join-Path $PSScriptRoot '.env')) {
+  $adminLine = Get-Content (Join-Path $PSScriptRoot '.env') | Where-Object { $_ -match '^ADMIN_INITIAL_PASSWORD=' } | Select-Object -First 1
+  if ($adminLine) {
+    $adminPw = ($adminLine -replace '^ADMIN_INITIAL_PASSWORD=', '').Trim()
+    if ($adminPw) { $loginHint = "admin / $adminPw" }
+  }
+}
+
 # ── Done ─────────────────────────────────────────────────────
 Write-KlBlank
 Write-Kl ("$MINT" + '  ██████████████████████████████████████████████████████' + $R)
 Write-Kl ("$PEARL$B" + '   KURDLOGS CORE  ·  DEPLOY COMPLETE' + $R)
 Write-Kl ("$MUTED" + "   open  →  http://localhost:$port" + $R)
-Write-Kl ("$MUTED" + '   login →  admin / admin123' + $R)
+Write-Kl ("$MUTED" + "   login →  $loginHint" + $R)
+Write-Kl ("$MUTED" + '   note  →  change password + enable MFA after first login' + $R)
 Write-Kl ("$MUTED" + '   tip   →  hard refresh (Ctrl+Shift+R) after first build' + $R)
 Write-Kl ("$MINT" + '  ██████████████████████████████████████████████████████' + $R)
 Write-KlBlank

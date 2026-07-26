@@ -25,7 +25,6 @@ export default function EmbedPlayerPage() {
     }
 
     const apiKey = searchParams.get('api_key');
-    const accessToken = searchParams.get('access_token');
     const streamToken = searchParams.get('token');
 
     async function resolve() {
@@ -40,17 +39,6 @@ export default function EmbedPlayerPage() {
             return;
           }
           outputType = json.data?.outputType || 'HLS';
-        } else if (accessToken) {
-          const res = await fetch('/api/channels', {
-            headers: { Authorization: `Bearer ${accessToken}` },
-          });
-          const json = await res.json();
-          const channel = json.data?.find((c: { slug: string }) => c.slug === slug!);
-          if (!channel) {
-            setError('Channel not found');
-            return;
-          }
-          outputType = channel.outputType || 'HLS';
         }
 
         const manifest = manifestFromQuery(searchParams);
@@ -61,9 +49,8 @@ export default function EmbedPlayerPage() {
           setSrc(`/stream/play/${channelSlug}/${manifest}?api_key=${encodeURIComponent(apiKey)}`);
         } else if (streamToken) {
           setSrc(buildStreamUrl(channelSlug, manifest, streamToken));
-        } else if (accessToken) {
-          setSrc(`/stream/${channelSlug}/${manifest}?access_token=${encodeURIComponent(accessToken)}`);
         } else {
+          // Same-origin embed uses httpOnly session cookie when logged in.
           setSrc(buildStreamUrl(channelSlug, manifest));
         }
       } catch {

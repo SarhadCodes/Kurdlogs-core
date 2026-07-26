@@ -1,5 +1,7 @@
 #!/bin/bash
-# KurdLogs Core — branded installer (Linux / VPS)
+# KurdLogs Core — public installer (downloads binaries only, never the source)
+# Usage:
+#   curl -fsSL https://kurdlogs-core.sarhadyt.workers.dev/install.sh | sudo bash
 set -euo pipefail
 
 ESC=$'\033'
@@ -16,7 +18,9 @@ OK="${ESC}[38;2;74;222;128m"
 ERR="${ESC}[38;2;248;113;113m"
 PROMPT="${ESC}[38;2;167;139;250m"
 
-cd "$(dirname "$0")"
+DIST_BASE="${KURDLOGS_DIST_BASE:-https://kurdlogs-core.sarhadyt.workers.dev}"
+INSTALL_DIR="${KURDLOGS_INSTALL_DIR:-/opt/kurdlogs-core}"
+IMAGE_TAG="${KURDLOGS_IMAGE_TAG:-latest}"
 
 banner() {
   clear 2>/dev/null || true
@@ -24,13 +28,9 @@ banner() {
   echo -e "${CYAN}          ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄${R}"
   echo -e "${CYAN}        ▐█▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀█▌${R}"
   echo -e "${PEARL}${B}              K U R D L O G S   C O R E${R}"
-  echo -e "${MUTED}           self-hosted broadcast control panel${R}"
+  echo -e "${MUTED}           free binary install · source stays private${R}"
   echo -e "${CYAN}        ▐█▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄█▌${R}"
   echo -e "${CYAN}          ▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀${R}"
-  echo ""
-  echo -e "${LINE}  ┌─ session ─────────────────────────────────────────┐${R}"
-  echo -e "${LINE}  │${R}  ${MINT}●${R} live install   ${MUTED}│${R}  docker + apt   ${MUTED}│${R}  VPS / server  ${LINE}│${R}"
-  echo -e "${LINE}  └───────────────────────────────────────────────────┘${R}"
   echo ""
 }
 
@@ -47,21 +47,6 @@ ok()   { echo -e "  ${OK}${B}✓${R}  ${PEARL}$1${R}"; }
 fail() { echo -e "  ${ERR}${B}✗${R}  ${PEARL}$1${R}"; }
 info() { echo -e "  ${MUTED}→${R}  $1"; }
 cmd()  { echo -e "${PROMPT}${B}❯${R} ${MUTED}kurdlogs${R} ${DIM}›${R} $1"; }
-
-progress() {
-  local label="$1"
-  echo -e "${MUTED}  ${label}${R}"
-  local i
-  for i in $(seq 1 24); do
-    local fill empty pct
-    fill=$(printf '█%.0s' $(seq 1 "$i"))
-    empty=$(printf '░%.0s' $(seq 1 $((24 - i))) 2>/dev/null || true)
-    pct=$((100 * i / 24))
-    printf "\r  ${CYAN}%s${DIM}%s${R}  ${MUTED}%s%%%R " "$fill" "$empty" "$pct"
-    sleep 0.02
-  done
-  echo ""
-}
 
 detect_public_ip() {
   curl -fsS --max-time 8 ifconfig.me 2>/dev/null \
@@ -81,91 +66,114 @@ rand_hex() {
 banner
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
-  fail "Please run as root (use sudo ./install.sh)"
+  fail "Please run as root (use sudo bash)"
   exit 1
 fi
 
 PUBLIC_IP="$(detect_public_ip)"
 HTTP_PORT="${HTTP_PORT:-8081}"
 
-step "01" "Update system"
-cmd "apt-get update && apt-get upgrade"
+step "01" "Install runtime dependencies"
+cmd "apt-get install curl ca-certificates"
 export DEBIAN_FRONTEND=noninteractive
-apt-get update -qq
-apt-get upgrade -y -qq
-ok "System packages refreshed"
+if command -v apt-get >/dev/null 2>&1; then
+  apt-get update -qq
+  apt-get install -y -qq curl ca-certificates
+fi
+ok "Dependencies ready"
 
-step "02" "Install dependencies"
-cmd "apt-get install curl ca-certificates ffmpeg"
-apt-get install -y -qq curl ca-certificates ffmpeg
-ok "Dependencies installed"
-
-step "03" "Install Docker"
+step "02" "Install Docker"
 cmd "docker --version || get.docker.com"
 if ! command -v docker >/dev/null 2>&1; then
-  progress "installing Docker Engine"
-  curl -fsSL https://get.docker.com -o get-docker.sh
-  sh get-docker.sh
-  rm -f get-docker.sh
+  curl -fsSL https://get.docker.com -o /tmp/get-docker.sh
+  sh /tmp/get-docker.sh
+  rm -f /tmp/get-docker.sh
 else
   info "$(docker --version)"
 fi
 if ! docker compose version >/dev/null 2>&1; then
-  apt-get install -y -qq docker-compose-plugin
+  if command -v apt-get >/dev/null 2>&1; then
+    apt-get install -y -qq docker-compose-plugin
+  else
+    fail "Docker Compose plugin is required"
+    exit 1
+  fi
 fi
-info "$(docker compose version)"
 ok "Docker runtime ready"
 
+step "03" "Download release package (no source)"
+cmd "mkdir -p ${INSTALL_DIR}"
+mkdir -p "${INSTALL_DIR}"
+cd "${INSTALL_DIR}"
+curl -fsSL "${DIST_BASE}/release/docker-compose.yml" -o docker-compose.yml
+ok "Compose file installed to ${INSTALL_DIR}"
+
 step "04" "Configure environment"
+ADMIN_PASSWORD_SHOWN=""
 if [ ! -f .env ]; then
+  ADMIN_PASSWORD_SHOWN="Kl-$(rand_hex 10)9A"
   cat > .env <<EOF
-PUBLIC_BASE_URL=http://${PUBLIC_IP}
+PUBLIC_BASE_URL=http://${PUBLIC_IP}:${HTTP_PORT}
 JWT_SECRET=$(rand_hex 24)
+ADMIN_INITIAL_PASSWORD=${ADMIN_PASSWORD_SHOWN}
 IPTV_API_KEY=$(rand_hex 16)
 POSTGRES_PASSWORD=$(rand_hex 16)
 HTTP_PORT=${HTTP_PORT}
-RTMP_PORT=1935
+RTMP_PUBLISH_PORT=1936
+MCR_RTMP_PORT=1936
 TOKEN_OVERLAP_SECONDS=120
 TOKEN_REFRESH_AHEAD_SECONDS=90
+KURDLOGS_IMAGE_BACKEND=ghcr.io/sarhadcodes/kurdlogs-core-backend:${IMAGE_TAG}
+KURDLOGS_IMAGE_FRONTEND=ghcr.io/sarhadcodes/kurdlogs-core-frontend:${IMAGE_TAG}
+KURDLOGS_IMAGE_NGINX=ghcr.io/sarhadcodes/kurdlogs-core-nginx:${IMAGE_TAG}
 EOF
   info "Created .env with auto-generated secrets"
 else
+  ADMIN_PASSWORD_SHOWN="$(grep -E '^ADMIN_INITIAL_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d= -f2- || true)"
   info ".env already exists — keeping your settings"
-  if ! grep -q '^PUBLIC_BASE_URL=' .env; then
-    echo "PUBLIC_BASE_URL=http://${PUBLIC_IP}" >> .env
-  fi
 fi
 ok "Environment ready"
 
-# shellcheck disable=SC1091
-set -a
-source .env
-set +a
+step "05" "Pull binary images"
+cmd "docker compose pull"
+if ! docker compose pull; then
+  missing=0
+  for img in \
+    "ghcr.io/sarhadcodes/kurdlogs-core-backend:${IMAGE_TAG}" \
+    "ghcr.io/sarhadcodes/kurdlogs-core-frontend:${IMAGE_TAG}" \
+    "ghcr.io/sarhadcodes/kurdlogs-core-nginx:${IMAGE_TAG}"
+  do
+    if ! docker image inspect "$img" >/dev/null 2>&1; then
+      fail "Missing image: $img"
+      missing=1
+    fi
+  done
+  if [ "$missing" -ne 0 ]; then
+    fail "Public GHCR images are not available yet. Owner must publish them (Actions → Publish release images) and set packages to Public."
+    exit 1
+  fi
+  info "Registry pull failed, but local images were found — continuing"
+else
+  ok "Images downloaded"
+fi
 
-BASE_URL="${PUBLIC_BASE_URL:-http://${PUBLIC_IP}}"
-HOST_PORT="${HTTP_PORT:-8081}"
-
-step "05" "Build containers"
-cmd "docker compose build"
-progress "building images (this can take a few minutes)"
-docker compose build
-ok "Images built"
-
-step "06" "Start services"
+step "06" "Start KurdLogs Core"
 cmd "docker compose up -d"
-progress "bringing stack online"
 docker compose up -d
 ok "Services started"
 
+BASE_URL="http://${PUBLIC_IP}:${HTTP_PORT}"
 echo ""
 echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"
 echo -e "${PEARL}${B}   KURDLOGS CORE  ·  INSTALL COMPLETE${R}"
-if [ "$HOST_PORT" = "80" ]; then
-  echo -e "${MUTED}   open  →  ${BASE_URL}${R}"
+echo -e "${MUTED}   open  →  ${BASE_URL}${R}"
+if [ -n "${ADMIN_PASSWORD_SHOWN}" ]; then
+  echo -e "${MUTED}   login →  admin / ${ADMIN_PASSWORD_SHOWN}${R}"
+  echo -e "${MUTED}   note  →  change password + enable MFA in Settings after first login${R}"
 else
-  echo -e "${MUTED}   open  →  ${BASE_URL%/*}:${HOST_PORT}${R}"
+  echo -e "${MUTED}   login →  admin / (see ADMIN_INITIAL_PASSWORD in .env or backend logs)${R}"
 fi
-echo -e "${MUTED}   login →  admin / admin123${R}"
-echo -e "${MUTED}   tip   →  docker compose ps · docker compose logs -f backend${R}"
+echo -e "${MUTED}   path  →  ${INSTALL_DIR}${R}"
+echo -e "${MUTED}   tip   →  cd ${INSTALL_DIR} && docker compose logs -f backend${R}"
 echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"
 echo ""

@@ -11,10 +11,13 @@ $example = Join-Path (Get-Location) '.env.example'
 if (-not (Test-Path $envPath)) {
   if (Test-Path $example) {
     Copy-Item $example $envPath -Force
+    $jwt = -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
     $text = Get-Content $envPath -Raw
     $text = $text -replace 'YOUR_VPS_IP', 'localhost'
     $text = $text -replace 'POSTGRES_PASSWORD=change-me-db-password', 'POSTGRES_PASSWORD=postgres'
-    $text = $text -replace 'JWT_SECRET=change-me-long-random-secret', 'JWT_SECRET=local-dev-jwt-secret-change-me'
+    $text = $text -replace 'JWT_SECRET=replace-with-random-64-char-secret-from-install-script', "JWT_SECRET=$jwt"
+    $text = $text -replace 'JWT_SECRET=change-me-long-random-secret', "JWT_SECRET=$jwt"
+    $text = $text -replace 'JWT_SECRET=local-dev-jwt-secret-change-me', "JWT_SECRET=$jwt"
     $text = $text -replace 'IPTV_API_KEY=change-me-iptv-api-key', 'IPTV_API_KEY=local-dev-iptv-key'
     Set-Content -Path $envPath -Value $text.TrimEnd() -Encoding utf8
     Write-Host 'Created .env from .env.example for local use.' -ForegroundColor Yellow

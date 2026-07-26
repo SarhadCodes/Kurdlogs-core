@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
 import {
   Play,
   Square,
@@ -19,10 +19,11 @@ import {
   Globe,
   Users,
   Blocks,
+  Key,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { channelApi, playlistApi, blueprintApi, monitorApi } from '../services/api';
-import { Playlist, ChannelBlueprint } from '../types';
+import { channelApi, playlistApi, blueprintApi, monitorApi, tokenApi } from '../services/api';
+import { Playlist, ChannelBlueprint, Token } from '../types';
 import { Channel, StreamStats, StreamLog, ChannelHealthReport } from '../types';
 import { useChannelStore } from '../stores/channelStore';
 import Layout from '../components/Layout';
@@ -35,6 +36,7 @@ import LivePlayer, {
 } from '../components/LivePlayer';
 import PreviewTestPanel from '../components/PreviewTestPanel';
 import HybridChannelPanel from '../components/HybridChannelPanel';
+import ChannelOutputPanel from '../components/ChannelOutputPanel';
 import ViewerMapFullscreen from '../components/ViewerMapFullscreen';
 import type { ViewerLocation, ViewerMapPayload } from '../types/viewer';
 import { wsService } from '../services/websocket';
@@ -51,7 +53,7 @@ import {
   PLAYER_ENGINE_OPTIONS,
   type PlayerEngine,
 } from '../types/player';
-
+import type { ChannelPlayUrlsData } from '../utils/channelOutputs';
 function getChannelModeDisplay(channel: Channel) {
   if (channel.useBlueprint) {
     return { label: 'Blueprint', Icon: Blocks, color: 'text-muted-foreground' };
@@ -65,7 +67,14 @@ function getChannelModeDisplay(channel: Channel) {
 const ChannelDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { stats, updateChannelStats } = useChannelStore();
+
+  const tabParam = searchParams.get('tab');
+  const activeTab =
+    tabParam === 'outputs' || tabParam === 'settings' || tabParam === 'logs' || tabParam === 'preview'
+      ? tabParam
+      : 'preview';
 
   const [channel, setChannel] = useState<Channel | null>(null);
   const [loading, setLoading] = useState(true);
@@ -83,6 +92,8 @@ const ChannelDetailPage: React.FC = () => {
   const [viewers, setViewers] = useState(0);
   const [viewerLocations, setViewerLocations] = useState<ViewerLocation[]>([]);
   const [viewerMapOpen, setViewerMapOpen] = useState(false);
+  const [activeToken, setActiveToken] = useState<Token | null>(null);
+  const [playUrls, setPlayUrls] = useState<ChannelPlayUrlsData | null>(null);
 
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -156,11 +167,27 @@ const ChannelDetailPage: React.FC = () => {
     }
   }, [id]);
 
+  const fetchOutputs = useCallback(async () => {
+    if (!id) return;
+    try {
+      const [tokensRes, playUrlsRes] = await Promise.all([
+        tokenApi.getAll(),
+        channelApi.getPlayUrls(id),
+      ]);
+      setPlayUrls(playUrlsRes.data || null);
+      const token = (tokensRes.data || []).find((t) => t.channelId === id && t.isActive);
+      setActiveToken(token || null);
+    } catch {
+      // Outputs are optional for the detail view
+    }
+  }, [id]);
+
   useEffect(() => {
     fetchChannel();
     fetchStats();
     fetchLogs();
     fetchLivePlayback();
+    fetchOutputs();
     blueprintApi.getAll().then((res) => {
       if (res.data) setBlueprints(res.data);
     }).catch(() => {});
@@ -172,7 +199,7 @@ const ChannelDetailPage: React.FC = () => {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [fetchChannel, fetchStats, fetchLogs, fetchLivePlayback]);
+  }, [fetchChannel, fetchStats, fetchLogs, fetchLivePlayback, fetchOutputs]);
 
   useEffect(() => {
     if (channel?.blueprintId) setSelectedBlueprintId(channel.blueprintId);
@@ -237,7 +264,10 @@ const ChannelDetailPage: React.FC = () => {
           toast.success('Channel restarting...');
           break;
       }
-      setTimeout(fetchChannel, 1500);
+      setTimeout(() => {
+        fetchChannel();
+        fetchOutputs();
+      }, 1500);
     } catch (err: any) {
       toast.error(`Failed to ${action} channel`);
     } finally {
@@ -442,12 +472,6 @@ const ChannelDetailPage: React.FC = () => {
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button asChild variant="secondary" className="flex-1 sm:flex-none">
-              <Link to={`/channels/${id}/outputs`}>
-                <Link2 className="h-4 w-4 shrink-0" />
-                Output links
-              </Link>
-            </Button>
             <Button
               type="button"
               onClick={() => handleAction('start')}
@@ -519,9 +543,20 @@ const ChannelDetailPage: React.FC = () => {
           </div>
         </div>
 
-        <Tabs defaultValue="preview" className="w-full">
-          <TabsList className="grid w-full grid-cols-3 sm:w-auto sm:inline-flex">
+        <Tabs
+          value={activeTab}
+          onValueChange={(value) => {
+            const next = new URLSearchParams(searchParams);
+            if (value === 'preview') next.delete('tab');
+            else next.set('tab', value);
+            setSearchParams(next, { replace: true });
+            if (value === 'outputs') void fetchOutputs();
+          }}
+          className="w-full"
+        >
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 sm:w-auto sm:inline-flex">
             <TabsTrigger value="preview">Preview</TabsTrigger>
+            <TabsTrigger value="outputs">Output links</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
             <TabsTrigger value="logs">Logs</TabsTrigger>
           </TabsList>
@@ -584,6 +619,49 @@ const ChannelDetailPage: React.FC = () => {
                 />
               )}
             </Card>
+          </TabsContent>
+
+          <TabsContent value="outputs" className="mt-4">
+            <div className="space-y-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link2 className="h-4 w-4 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">/{channel.slug}</span>
+                  {activeToken ? (
+                    <span className="rounded bg-emerald-400/10 px-2 py-0.5 text-xs text-emerald-300/90">
+                      Active stream token
+                    </span>
+                  ) : (
+                    <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
+                      No active token
+                    </span>
+                  )}
+                </div>
+                <Button asChild variant="secondary" size="sm">
+                  <Link to="/tokens">
+                    <Key className="h-3.5 w-3.5" />
+                    Manage tokens
+                  </Link>
+                </Button>
+              </div>
+
+              {playUrls?.streamReady === false && (
+                <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
+                  Stream files are not on the server yet. Click <strong className="text-foreground">Start</strong> or{' '}
+                  <strong className="text-foreground">Restart</strong>, wait until the preview plays, then use these
+                  links.
+                  {playUrls.tokenProtected && (
+                    <>
+                      {' '}
+                      This channel has token protection — use the <strong className="text-foreground">With stream token</strong>{' '}
+                      URLs in VLC, not the public links.
+                    </>
+                  )}
+                </div>
+              )}
+
+              <ChannelOutputPanel channel={channel} activeToken={activeToken} playUrls={playUrls} />
+            </div>
           </TabsContent>
 
           <TabsContent value="logs" className="mt-4">

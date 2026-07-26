@@ -27,7 +27,8 @@ services:
         required: false
     environment:
       DATABASE_URL: postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/kurdlogs
-      JWT_SECRET: ${JWT_SECRET:-change-me-jwt-secret}
+      JWT_SECRET: ${JWT_SECRET}
+      ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
       PORT: 3001
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8081,http://localhost,${PUBLIC_BASE_URL:-http://localhost:8081}}
       FFMPEG_PATH: ffmpeg

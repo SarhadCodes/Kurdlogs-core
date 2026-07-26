@@ -23,6 +23,19 @@ import InstallPage from './pages/InstallPage';
 
 function AuthenticatedApp() {
   useWebSocket();
+  const user = useAuthStore((s) => s.user);
+
+  const mustChange = Boolean(user?.mustChangePassword);
+  const mustSetupMfa = Boolean(user?.mfaRequired && !user?.mfaEnabled);
+
+  if (mustChange || mustSetupMfa) {
+    return (
+      <Routes>
+        <Route path="/settings" element={<SettingsPage />} />
+        <Route path="*" element={<Navigate to="/settings" replace />} />
+      </Routes>
+    );
+  }
 
   return (
     <Routes>

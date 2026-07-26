@@ -360,7 +360,9 @@ export default function Layout({ children }: LayoutProps) {
         <ConfirmDialog
           isOpen={logoutOpen}
           onClose={() => setLogoutOpen(false)}
-          onConfirm={logout}
+          onConfirm={async () => {
+            await logout();
+          }}
           title="Sign out"
           message="Are you sure you want to log out of KurdLogs?"
           confirmLabel="Log out"
