@@ -1,6 +1,8 @@
 {
   "name": "kurdlogs-core-backend",
   "version": "1.0.0",
+  "private": true,
+  "license": "UNLICENSED",
   "description": "KurdLogs Core - IPTV Streaming Management Backend",
   "main": "dist/index.js",
   "scripts": {

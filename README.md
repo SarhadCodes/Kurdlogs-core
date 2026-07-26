@@ -55,4 +55,10 @@ sudo ./install.sh
 - **Pass:** `admin123`
 
 ## License
-MIT
+
+KurdLogs Core is **free to use**, but it is **not open source**.
+
+See [`LICENSE`](./LICENSE) for the proprietary terms. In short:
+
+- You may install and run KurdLogs Core for personal or commercial use at no cost.
+- You may **not** modify, redistribute, or re-publish the source code without written permission.
