@@ -206,6 +206,23 @@ if [ -n "${PG_PASS}" ]; then
   done
 fi
 
+if [ -n "${ADMIN_PASSWORD_SHOWN}" ]; then
+  admin_synced=0
+  for _ in $(seq 1 45); do
+    if docker compose exec -T backend node dist/scripts/reset-admin.js "${ADMIN_PASSWORD_SHOWN}" >/dev/null 2>&1; then
+      admin_synced=1
+      break
+    fi
+    sleep 2
+  done
+  if [ "$admin_synced" -eq 1 ]; then
+    ok "Admin login synced to installer password"
+  else
+    fail "Could not sync admin password yet — wait a minute and run:"
+    info "docker compose exec -T backend node dist/scripts/reset-admin.js \"${ADMIN_PASSWORD_SHOWN}\""
+  fi
+fi
+
 ok "Services started"
 
 BASE_URL="http://${PUBLIC_IP}:${HTTP_PORT}"

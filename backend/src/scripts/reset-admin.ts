@@ -10,7 +10,10 @@ function generatePassword(): string {
 }
 
 async function main() {
-  const password = (process.argv[2] || '').trim() || generatePassword();
+  const password =
+    (process.argv[2] || '').trim() ||
+    (process.env.ADMIN_INITIAL_PASSWORD || '').trim() ||
+    generatePassword();
   const passwordHash = await bcrypt.hash(password, 12);
   const user = await prisma.user.upsert({
     where: { username: 'admin' },

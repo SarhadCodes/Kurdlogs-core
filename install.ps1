@@ -178,6 +178,24 @@ if ($pgPass) {
   }
 }
 
+if ($adminPasswordShown) {
+  $adminSynced = $false
+  for ($i = 0; $i -lt 45; $i++) {
+    docker compose exec -T backend node dist/scripts/reset-admin.js $adminPasswordShown 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) {
+      $adminSynced = $true
+      break
+    }
+    Start-Sleep -Seconds 2
+  }
+  if ($adminSynced) {
+    Write-Ok 'Admin login synced to installer password'
+  } else {
+    Write-Host '  ! Could not sync admin password yet — wait a minute and run:' -ForegroundColor Yellow
+    Write-Host "    docker compose exec -T backend node dist/scripts/reset-admin.js `"$adminPasswordShown`"" -ForegroundColor DarkGray
+  }
+}
+
 Write-Ok 'Services started'
 
 Write-Host ""
