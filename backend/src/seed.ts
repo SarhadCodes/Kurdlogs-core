@@ -40,7 +40,26 @@ async function main() {
     logger.info('Also printed by the installer and stored as ADMIN_INITIAL_PASSWORD.');
     logger.info('============================================================');
   } else {
-    logger.info('Admin user already exists');
+    const fromEnv = (process.env.ADMIN_INITIAL_PASSWORD || '').trim();
+    const syncRequested =
+      process.env.SYNC_ADMIN_PASSWORD === '1' || process.env.SYNC_ADMIN_PASSWORD === 'true';
+    if (syncRequested && fromEnv.length >= 12) {
+      const passwordHash = await bcrypt.hash(fromEnv, 12);
+      await prisma.user.update({
+        where: { username: 'admin' },
+        data: {
+          passwordHash,
+          mustChangePassword: false,
+          role: 'ADMIN',
+          mfaEnabled: false,
+          mfaSecret: null,
+          mfaBackupCodes: null,
+        },
+      });
+      logger.info('Synced admin password from ADMIN_INITIAL_PASSWORD (installer)');
+    } else {
+      logger.info('Admin user already exists');
+    }
   }
 
   const profilesCount = await prisma.transcodingProfile.count();

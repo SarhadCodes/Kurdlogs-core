@@ -189,6 +189,7 @@ fi
 if port_in_use "${HTTP_PORT}"; then
   info "Port ${HTTP_PORT} is already in use — the panel may not load."
 fi
+set_env_value "SYNC_ADMIN_PASSWORD" "1"
 ok "Environment ready"
 
 step "05" "Pull binary images"
@@ -230,21 +231,98 @@ if [ -n "${PG_PASS}" ]; then
   done
 fi
 
+wait_backend_ready() {
+  for _ in $(seq 1 60); do
+    if docker compose exec -T backend node -e "process.exit(0)" >/dev/null 2>&1; then
+      return 0
+    fi
+    sleep 2
+  done
+  return 1
+}
+
+sync_admin_password() {
+  docker compose exec -T -w /app backend node <<'NODE' 2>&1 | grep -q 'admin-sync-ok'
+const bcrypt = require("bcryptjs");
+const { PrismaClient } = require("@prisma/client");
+const prisma = new PrismaClient();
+const password = (process.env.ADMIN_INITIAL_PASSWORD || "").trim();
+if (!password) {
+  console.error("ADMIN_INITIAL_PASSWORD missing");
+  process.exit(2);
+}
+bcrypt.hash(password, 12)
+  .then((hash) => prisma.user.upsert({
+    where: { username: "admin" },
+    update: {
+      passwordHash: hash,
+      mustChangePassword: false,
+      role: "ADMIN",
+      mfaEnabled: false,
+      mfaSecret: null,
+      mfaBackupCodes: null,
+    },
+    create: {
+      username: "admin",
+      passwordHash: hash,
+      role: "ADMIN",
+      mustChangePassword: false,
+    },
+  }))
+  .then(() => prisma.$disconnect())
+  .then(() => {
+    console.log("admin-sync-ok");
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error(err);
+    prisma.$disconnect().finally(() => process.exit(1));
+  });
+NODE
+}
+
+verify_admin_login() {
+  local password="$1"
+  curl -fsS -X POST "http://127.0.0.1:${HTTP_PORT}/api/auth/login" \
+    -H 'Content-Type: application/json' \
+    -d "{\"username\":\"admin\",\"password\":\"${password}\"}" >/dev/null 2>&1
+}
+
 if [ -n "${ADMIN_PASSWORD_SHOWN}" ]; then
+  if ! wait_backend_ready; then
+    fail "Backend did not become ready — check: docker compose logs backend"
+    exit 1
+  fi
+
   admin_synced=0
-  for _ in $(seq 1 45); do
-    if docker compose exec -T backend node dist/scripts/reset-admin.js "${ADMIN_PASSWORD_SHOWN}" >/dev/null 2>&1; then
+  for _ in $(seq 1 30); do
+    if sync_admin_password; then
       admin_synced=1
       break
     fi
     sleep 2
   done
-  if [ "$admin_synced" -eq 1 ]; then
-    ok "Admin login synced to installer password"
-  else
-    fail "Could not sync admin password yet — wait a minute and run:"
+  if [ "$admin_synced" -ne 1 ]; then
+    fail "Failed to sync admin password into the database"
     info "docker compose exec -T backend node dist/scripts/reset-admin.js \"${ADMIN_PASSWORD_SHOWN}\""
+    exit 1
   fi
+
+  login_ok=0
+  for _ in $(seq 1 15); do
+    if verify_admin_login "${ADMIN_PASSWORD_SHOWN}"; then
+      login_ok=1
+      break
+    fi
+    sleep 2
+  done
+  if [ "$login_ok" -ne 1 ]; then
+    fail "Admin password was synced but login verification failed — check: docker compose logs backend"
+    exit 1
+  fi
+
+  set_env_value "SYNC_ADMIN_PASSWORD" "0"
+  ok "Admin login synced and verified"
 fi
 
 sleep 3

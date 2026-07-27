@@ -88,6 +88,68 @@ function Test-KlTcpPortInUse([int]$Port) {
   }
 }
 
+function Wait-KlBackendReady {
+  for ($i = 0; $i -lt 60; $i++) {
+    docker compose exec -T backend node -e "process.exit(0)" 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $true }
+    Start-Sleep -Seconds 2
+  }
+  return $false
+}
+
+function Invoke-KlAdminPasswordSync {
+  $script = @'
+const bcrypt = require("bcryptjs");
+const { PrismaClient } = require("@prisma/client");
+const prisma = new PrismaClient();
+const password = (process.env.ADMIN_INITIAL_PASSWORD || "").trim();
+if (!password) {
+  console.error("ADMIN_INITIAL_PASSWORD missing");
+  process.exit(2);
+}
+bcrypt.hash(password, 12)
+  .then((hash) => prisma.user.upsert({
+    where: { username: "admin" },
+    update: {
+      passwordHash: hash,
+      mustChangePassword: false,
+      role: "ADMIN",
+      mfaEnabled: false,
+      mfaSecret: null,
+      mfaBackupCodes: null,
+    },
+    create: {
+      username: "admin",
+      passwordHash: hash,
+      role: "ADMIN",
+      mustChangePassword: false,
+    },
+  }))
+  .then(() => prisma.$disconnect())
+  .then(() => {
+    console.log("admin-sync-ok");
+    process.exit(0);
+  })
+  .catch((err) => {
+    console.error(err);
+    prisma.$disconnect().finally(() => process.exit(1));
+  });
+'@
+  $out = $script | docker compose exec -T -w /app backend node 2>&1 | Out-String
+  return ($LASTEXITCODE -eq 0) -and ($out -match 'admin-sync-ok')
+}
+
+function Test-KlAdminLogin {
+  param([string]$Password)
+  try {
+    $body = '{"username":"admin","password":"' + ($Password -replace '\\', '\\\\' -replace '"', '\"') + '"}'
+    $resp = Invoke-RestMethod -Uri "http://localhost:$HttpPort/api/auth/login" -Method POST -Body $body -ContentType 'application/json' -TimeoutSec 15
+    return [bool]$resp.success
+  } catch {
+    return $false
+  }
+}
+
 $adminPasswordShown = $null
 if (-not (Test-Path $envPath)) {
   $bytes = New-Object byte[] 24
@@ -158,6 +220,8 @@ if (Test-KlTcpPortInUse $HttpPort) {
   }
 }
 
+Set-KlEnvValue $envPath 'SYNC_ADMIN_PASSWORD' '1'
+
 Write-Step '04' "Pull binary images"
 docker compose pull
 if ($LASTEXITCODE -ne 0) {
@@ -210,21 +274,42 @@ if ($pgPass) {
 }
 
 if ($adminPasswordShown) {
+  if (-not (Wait-KlBackendReady)) {
+    throw 'Backend did not become ready — check: docker compose logs backend'
+  }
+
   $adminSynced = $false
-  for ($i = 0; $i -lt 45; $i++) {
-    docker compose exec -T backend node dist/scripts/reset-admin.js $adminPasswordShown 2>$null | Out-Null
-    if ($LASTEXITCODE -eq 0) {
+  for ($i = 0; $i -lt 30; $i++) {
+    if (Invoke-KlAdminPasswordSync) {
       $adminSynced = $true
       break
     }
     Start-Sleep -Seconds 2
   }
-  if ($adminSynced) {
-    Write-Ok 'Admin login synced to installer password'
-  } else {
-    Write-Host '  ! Could not sync admin password yet — wait a minute and run:' -ForegroundColor Yellow
-    Write-Host "    docker compose exec -T backend node dist/scripts/reset-admin.js `"$adminPasswordShown`"" -ForegroundColor DarkGray
+  if (-not $adminSynced) {
+    throw @"
+Failed to sync admin password into the database.
+
+Try manually:
+  cd $InstallDir
+  docker compose exec -T backend node dist/scripts/reset-admin.js `"$adminPasswordShown`"
+"@
   }
+
+  $loginOk = $false
+  for ($i = 0; $i -lt 15; $i++) {
+    if (Test-KlAdminLogin $adminPasswordShown) {
+      $loginOk = $true
+      break
+    }
+    Start-Sleep -Seconds 2
+  }
+  if (-not $loginOk) {
+    throw 'Admin password was synced but login verification failed — check: docker compose logs backend'
+  }
+
+  Set-KlEnvValue $envPath 'SYNC_ADMIN_PASSWORD' '0'
+  Write-Ok 'Admin login synced and verified'
 }
 
 Start-Sleep -Seconds 3
