@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import { Compass, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { useAuthStore } from '@/stores/authStore';
 import { useOnboardingTour } from '@/hooks/useOnboardingTour';
@@ -59,6 +59,7 @@ function NavHighlight({ target }: { target?: string }) {
 export default function OnboardingTour() {
   const user = useAuthStore((s) => s.user);
   const navigate = useNavigate();
+  const location = useLocation();
   const blocked = Boolean(user?.mustChangePassword);
   const {
     active,
@@ -78,11 +79,11 @@ export default function OnboardingTour() {
   );
 
   useEffect(() => {
-    if (!active || !step) return;
-    if (step.path) {
+    if (!active || !step?.path) return;
+    if (location.pathname !== step.path) {
       navigate(step.path);
     }
-  }, [active, step?.id, step?.path, navigate]);
+  }, [active, step?.id, step?.path, navigate, location.pathname]);
 
   if (!active || !step) return null;
 

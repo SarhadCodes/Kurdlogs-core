@@ -20,6 +20,7 @@ import BenchmarkPage from './pages/BenchmarkPage';
 import BlueprintsPage from './pages/BlueprintsPage';
 import SettingsPage from './pages/SettingsPage';
 import InstallPage from './pages/InstallPage';
+import OnboardingTour from './components/OnboardingTour';
 
 function AuthenticatedApp() {
   useWebSocket();
@@ -29,15 +30,19 @@ function AuthenticatedApp() {
   // (e.g. admin-created users). Installer admin is not forced to change.
   if (user?.mustChangePassword) {
     return (
-      <Routes>
-        <Route path="/settings" element={<SettingsPage />} />
-        <Route path="*" element={<Navigate to="/settings" replace />} />
-      </Routes>
+      <>
+        <Routes>
+          <Route path="/settings" element={<SettingsPage />} />
+          <Route path="*" element={<Navigate to="/settings" replace />} />
+        </Routes>
+      </>
     );
   }
 
   return (
-    <Routes>
+    <>
+      <OnboardingTour />
+      <Routes>
       <Route path="/dashboard" element={<Navigate to="/" replace />} />
       <Route path="/" element={<DashboardPage />} />
       <Route path="/channels" element={<ChannelsPage />} />
@@ -55,7 +60,8 @@ function AuthenticatedApp() {
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/install" element={<InstallPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }
 

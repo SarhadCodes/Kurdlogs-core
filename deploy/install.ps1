@@ -5,9 +5,9 @@
 param(
   [string]$InstallDir = $(Join-Path $env:LOCALAPPDATA 'KurdLogs-Core'),
   [string]$DistBase = 'https://kurdlogs-core.sarhadyt.workers.dev',
-  [string]$ImageTag = '1.2.0',
+  [string]$ImageTag = '1.2.1',
   [int]$HttpPort = 8081,
-  [string]$InstallerVersion = '2026-07-27-v2'
+  [string]$InstallerVersion = '2026-07-27-v3'
 )
 
 $ErrorActionPreference = 'Stop'
