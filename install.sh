@@ -193,6 +193,19 @@ fi
 step "06" "Start KurdLogs Core"
 cmd "docker compose up -d --pull always --force-recreate"
 docker compose up -d --pull always --force-recreate
+
+PG_PASS="$(grep -E '^POSTGRES_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r' || true)"
+if [ -n "${PG_PASS}" ]; then
+  for _ in $(seq 1 30); do
+    if docker compose exec -T postgres pg_isready -U postgres >/dev/null 2>&1; then
+      docker compose exec -T postgres psql -U postgres -c "ALTER USER postgres PASSWORD '${PG_PASS}';" >/dev/null 2>&1 || true
+      docker compose up -d --force-recreate backend >/dev/null 2>&1 || true
+      break
+    fi
+    sleep 2
+  done
+fi
+
 ok "Services started"
 
 BASE_URL="http://${PUBLIC_IP}:${HTTP_PORT}"

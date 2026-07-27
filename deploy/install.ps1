@@ -163,6 +163,21 @@ $($missing -join "`n")
 Write-Step '05' "Start KurdLogs Core"
 docker compose up -d --pull always --force-recreate
 if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
+
+$pgPass = Get-KlEnvValue $envPath 'POSTGRES_PASSWORD'
+if ($pgPass) {
+  $ready = $false
+  for ($i = 0; $i -lt 30; $i++) {
+    docker compose exec -T postgres pg_isready -U postgres 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+    Start-Sleep -Seconds 2
+  }
+  if ($ready) {
+    docker compose exec -T postgres psql -U postgres -c "ALTER USER postgres PASSWORD '$pgPass';" 2>$null | Out-Null
+    docker compose up -d --force-recreate backend | Out-Null
+  }
+}
+
 Write-Ok 'Services started'
 
 Write-Host ""
