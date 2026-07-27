@@ -47,11 +47,10 @@ Write-Ok 'docker-compose.yml'
 Write-Step '03' "Configure environment"
 $envPath = Join-Path $InstallDir '.env'
 
+$KlDefaultAdminPassword = 'Kurdlogs!'
+
 function New-KlAdminPassword {
-  $bytes = New-Object byte[] 10
-  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-  $adminHex = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
-  return "Kl-${adminHex}9A"
+  return $KlDefaultAdminPassword
 }
 
 function Get-KlEnvValue([string]$Path, [string]$Key) {

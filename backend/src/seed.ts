@@ -1,4 +1,3 @@
-import { randomBytes } from 'crypto';
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
 import { TRANSCODING_PRESETS } from './config/constants';
@@ -6,10 +5,7 @@ import { logger } from './utils/logger';
 
 const prisma = new PrismaClient();
 
-function generateInitialAdminPassword(): string {
-  // Meets password policy: 12+ chars, upper, lower, digit; no weak defaults.
-  return `Kl-${randomBytes(10).toString('hex')}9A`;
-}
+const DEFAULT_ADMIN_PASSWORD = 'Kurdlogs!';
 
 async function main() {
   logger.info('Starting seed...');
@@ -20,7 +16,7 @@ async function main() {
 
   if (!adminExists) {
     const fromEnv = (process.env.ADMIN_INITIAL_PASSWORD || '').trim();
-    const password = fromEnv.length >= 12 ? fromEnv : generateInitialAdminPassword();
+    const password = fromEnv || DEFAULT_ADMIN_PASSWORD;
     const salt = await bcrypt.genSalt(12);
     const passwordHash = await bcrypt.hash(password, salt);
 
@@ -43,7 +39,7 @@ async function main() {
     const fromEnv = (process.env.ADMIN_INITIAL_PASSWORD || '').trim();
     const syncRequested =
       process.env.SYNC_ADMIN_PASSWORD === '1' || process.env.SYNC_ADMIN_PASSWORD === 'true';
-    if (syncRequested && fromEnv.length >= 12) {
+    if (syncRequested && fromEnv) {
       const passwordHash = await bcrypt.hash(fromEnv, 12);
       await prisma.user.update({
         where: { username: 'admin' },

@@ -135,7 +135,7 @@ ok "Compose file installed to ${INSTALL_DIR}"
 step "04" "Configure environment"
 ADMIN_PASSWORD_SHOWN=""
 if [ ! -f .env ]; then
-  ADMIN_PASSWORD_SHOWN="Kl-$(rand_hex 10)9A"
+  ADMIN_PASSWORD_SHOWN='Kurdlogs!'
   cat > .env <<EOF
 PUBLIC_BASE_URL=http://${PUBLIC_IP}:${HTTP_PORT}
 JWT_SECRET=$(rand_hex 24)
@@ -156,7 +156,7 @@ EOF
 else
   ADMIN_PASSWORD_SHOWN="$(grep -E '^ADMIN_INITIAL_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r' | sed -e 's/^["'\'']//' -e 's/["'\'']$//' || true)"
   if [ -z "${ADMIN_PASSWORD_SHOWN}" ]; then
-    ADMIN_PASSWORD_SHOWN="Kl-$(rand_hex 10)9A"
+    ADMIN_PASSWORD_SHOWN='Kurdlogs!'
     if grep -qE '^ADMIN_INITIAL_PASSWORD=' .env 2>/dev/null; then
       # replace empty value
       tmpfile="$(mktemp)"

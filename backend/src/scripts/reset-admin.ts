@@ -1,12 +1,12 @@
-import { randomBytes } from 'crypto';
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcryptjs';
-import { logger } from '../utils/logger';
+import bcrypt from 'bcryptjs';import { logger } from '../utils/logger';
 
 const prisma = new PrismaClient();
 
+const DEFAULT_ADMIN_PASSWORD = 'Kurdlogs!';
+
 function generatePassword(): string {
-  return `Kl-${randomBytes(10).toString('hex')}9A`;
+  return DEFAULT_ADMIN_PASSWORD;
 }
 
 async function main() {

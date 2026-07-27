@@ -78,8 +78,7 @@ function Ensure-KlEnv {
   }
 
   $jwt = -join ((1..48) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
-  $adminHex = -join ((1..20) | ForEach-Object { '{0:x}' -f (Get-Random -Max 16) })
-  $adminPw = "Kl-${adminHex}9A"
+  $adminPw = 'Kurdlogs!'
   $script:KlAdminPassword = $adminPw
 
   if (Test-Path $example) {

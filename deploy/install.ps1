@@ -6,7 +6,8 @@ param(
   [string]$InstallDir = $(Join-Path $env:LOCALAPPDATA 'KurdLogs-Core'),
   [string]$DistBase = 'https://kurdlogs-core.sarhadyt.workers.dev',
   [string]$ImageTag = '1.2.0',
-  [int]$HttpPort = 8081
+  [int]$HttpPort = 8081,
+  [string]$InstallerVersion = '2026-07-27-v2'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -47,11 +48,10 @@ Write-Ok 'docker-compose.yml'
 Write-Step '03' "Configure environment"
 $envPath = Join-Path $InstallDir '.env'
 
+$KlDefaultAdminPassword = 'Kurdlogs!'
+
 function New-KlAdminPassword {
-  $bytes = New-Object byte[] 10
-  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
-  $adminHex = ($bytes | ForEach-Object { $_.ToString('x2') }) -join ''
-  return "Kl-${adminHex}9A"
+  return $KlDefaultAdminPassword
 }
 
 function Get-KlEnvValue([string]$Path, [string]$Key) {
@@ -183,10 +183,10 @@ KURDLOGS_IMAGE_NGINX=ghcr.io/sarhadcodes/kurdlogs-core-nginx:$ImageTag
   Write-Ok 'Created .env with generated secrets'
 } else {
   $adminPasswordShown = Get-KlEnvValue $envPath 'ADMIN_INITIAL_PASSWORD'
-  if (-not $adminPasswordShown) {
-    $adminPasswordShown = New-KlAdminPassword
+  if (-not $adminPasswordShown -or $adminPasswordShown -match '^Kl-[a-f0-9]+9A$') {
+    $adminPasswordShown = $KlDefaultAdminPassword
     Set-KlEnvValue $envPath 'ADMIN_INITIAL_PASSWORD' $adminPasswordShown
-    Write-Ok 'Added ADMIN_INITIAL_PASSWORD to existing .env'
+    Write-Ok 'Set default admin password to Kurdlogs!'
   } else {
     Write-Ok '.env already exists — keeping your settings'
   }
@@ -327,6 +327,7 @@ Write-Ok 'Services started'
 
 Write-Host ""
 Write-Host "  INSTALL COMPLETE" -ForegroundColor Green
+Write-Host "  installer →  $InstallerVersion"
 Write-Host "  release  →  $ImageTag"
 Write-Host "  open      →  http://localhost:$HttpPort"
 Write-Host "  username →  admin"

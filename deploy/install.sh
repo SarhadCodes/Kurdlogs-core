@@ -21,6 +21,7 @@ PROMPT="${ESC}[38;2;167;139;250m"
 DIST_BASE="${KURDLOGS_DIST_BASE:-https://kurdlogs-core.sarhadyt.workers.dev}"
 INSTALL_DIR="${KURDLOGS_INSTALL_DIR:-/opt/kurdlogs-core}"
 IMAGE_TAG="${KURDLOGS_IMAGE_TAG:-1.2.0}"
+INSTALLER_VERSION="${KURDLOGS_INSTALLER_VERSION:-2026-07-27-v2}"
 
 banner() {
   clear 2>/dev/null || true
@@ -135,7 +136,7 @@ ok "Compose file installed to ${INSTALL_DIR}"
 step "04" "Configure environment"
 ADMIN_PASSWORD_SHOWN=""
 if [ ! -f .env ]; then
-  ADMIN_PASSWORD_SHOWN="Kl-$(rand_hex 10)9A"
+  ADMIN_PASSWORD_SHOWN='Kurdlogs!'
   cat > .env <<EOF
 PUBLIC_BASE_URL=http://${PUBLIC_IP}:${HTTP_PORT}
 JWT_SECRET=$(rand_hex 24)
@@ -155,17 +156,10 @@ EOF
   info "Created .env with auto-generated secrets"
 else
   ADMIN_PASSWORD_SHOWN="$(grep -E '^ADMIN_INITIAL_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r' | sed -e 's/^["'\'']//' -e 's/["'\'']$//' || true)"
-  if [ -z "${ADMIN_PASSWORD_SHOWN}" ]; then
-    ADMIN_PASSWORD_SHOWN="Kl-$(rand_hex 10)9A"
-    if grep -qE '^ADMIN_INITIAL_PASSWORD=' .env 2>/dev/null; then
-      # replace empty value
-      tmpfile="$(mktemp)"
-      sed "s|^ADMIN_INITIAL_PASSWORD=.*|ADMIN_INITIAL_PASSWORD=${ADMIN_PASSWORD_SHOWN}|" .env > "$tmpfile"
-      mv "$tmpfile" .env
-    else
-      printf '\nADMIN_INITIAL_PASSWORD=%s\n' "${ADMIN_PASSWORD_SHOWN}" >> .env
-    fi
-    info "Added ADMIN_INITIAL_PASSWORD to existing .env"
+  if [ -z "${ADMIN_PASSWORD_SHOWN}" ] || printf '%s' "${ADMIN_PASSWORD_SHOWN}" | grep -Eq '^Kl-[a-f0-9]+9A$'; then
+    ADMIN_PASSWORD_SHOWN='Kurdlogs!'
+    set_env_value "ADMIN_INITIAL_PASSWORD" "${ADMIN_PASSWORD_SHOWN}"
+    info "Set default admin password to Kurdlogs!"
   else
     info ".env already exists — keeping your settings"
   fi
@@ -342,6 +336,7 @@ BASE_URL="http://${PUBLIC_IP}:${HTTP_PORT}"
 echo ""
 echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"
 echo -e "${PEARL}${B}   KURDLOGS CORE  ·  INSTALL COMPLETE${R}"
+echo -e "${MUTED}   installer →  ${INSTALLER_VERSION}${R}"
 echo -e "${MUTED}   release  →  ${IMAGE_TAG}${R}"
 echo -e "${MUTED}   open      →  ${BASE_URL}${R}"
 echo -e "${MUTED}   username →  admin${R}"
