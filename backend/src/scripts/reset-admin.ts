@@ -16,7 +16,7 @@ async function main() {
     where: { username: 'admin' },
     update: {
       passwordHash,
-      mustChangePassword: true,
+      mustChangePassword: false,
       role: 'ADMIN',
       mfaEnabled: false,
       mfaSecret: null,
@@ -26,12 +26,11 @@ async function main() {
       username: 'admin',
       passwordHash,
       role: 'ADMIN',
-      mustChangePassword: true,
+      mustChangePassword: false,
     },
   });
   logger.info(`Admin user ready: ${user.username}`);
   logger.info(`Password: ${password}`);
-  logger.info('Change password and enable MFA after login.');
 }
 
 main()

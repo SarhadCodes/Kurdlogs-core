@@ -129,8 +129,21 @@ KURDLOGS_IMAGE_NGINX=ghcr.io/sarhadcodes/kurdlogs-core-nginx:${IMAGE_TAG}
 EOF
   info "Created .env with auto-generated secrets"
 else
-  ADMIN_PASSWORD_SHOWN="$(grep -E '^ADMIN_INITIAL_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d= -f2- || true)"
-  info ".env already exists — keeping your settings"
+  ADMIN_PASSWORD_SHOWN="$(grep -E '^ADMIN_INITIAL_PASSWORD=' .env 2>/dev/null | head -n1 | cut -d= -f2- | tr -d '\r' | sed -e 's/^["'\'']//' -e 's/["'\'']$//' || true)"
+  if [ -z "${ADMIN_PASSWORD_SHOWN}" ]; then
+    ADMIN_PASSWORD_SHOWN="Kl-$(rand_hex 10)9A"
+    if grep -qE '^ADMIN_INITIAL_PASSWORD=' .env 2>/dev/null; then
+      # replace empty value
+      tmpfile="$(mktemp)"
+      sed "s|^ADMIN_INITIAL_PASSWORD=.*|ADMIN_INITIAL_PASSWORD=${ADMIN_PASSWORD_SHOWN}|" .env > "$tmpfile"
+      mv "$tmpfile" .env
+    else
+      printf '\nADMIN_INITIAL_PASSWORD=%s\n' "${ADMIN_PASSWORD_SHOWN}" >> .env
+    fi
+    info "Added ADMIN_INITIAL_PASSWORD to existing .env"
+  else
+    info ".env already exists — keeping your settings"
+  fi
 fi
 ok "Environment ready"
 
@@ -166,14 +179,10 @@ BASE_URL="http://${PUBLIC_IP}:${HTTP_PORT}"
 echo ""
 echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"
 echo -e "${PEARL}${B}   KURDLOGS CORE  ·  INSTALL COMPLETE${R}"
-echo -e "${MUTED}   open  →  ${BASE_URL}${R}"
-if [ -n "${ADMIN_PASSWORD_SHOWN}" ]; then
-  echo -e "${MUTED}   login →  admin / ${ADMIN_PASSWORD_SHOWN}${R}"
-  echo -e "${MUTED}   note  →  change password + enable MFA in Settings after first login${R}"
-else
-  echo -e "${MUTED}   login →  admin / (see ADMIN_INITIAL_PASSWORD in .env or backend logs)${R}"
-fi
-echo -e "${MUTED}   path  →  ${INSTALL_DIR}${R}"
-echo -e "${MUTED}   tip   →  cd ${INSTALL_DIR} && docker compose logs -f backend${R}"
+echo -e "${MUTED}   open      →  ${BASE_URL}${R}"
+echo -e "${MUTED}   username →  admin${R}"
+echo -e "${AMBER}   password →  ${ADMIN_PASSWORD_SHOWN}${R}"
+echo -e "${MUTED}   path     →  ${INSTALL_DIR}${R}"
+echo -e "${MUTED}   tip      →  cd ${INSTALL_DIR} && docker compose logs -f backend${R}"
 echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"
 echo ""

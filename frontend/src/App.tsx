@@ -25,10 +25,9 @@ function AuthenticatedApp() {
   useWebSocket();
   const user = useAuthStore((s) => s.user);
 
-  const mustChange = Boolean(user?.mustChangePassword);
-  const mustSetupMfa = Boolean(user?.mfaRequired && !user?.mfaEnabled);
-
-  if (mustChange || mustSetupMfa) {
+  // Only lock the panel when an account was explicitly flagged to change password
+  // (e.g. admin-created users). Installer admin is not forced to change.
+  if (user?.mustChangePassword) {
     return (
       <Routes>
         <Route path="/settings" element={<SettingsPage />} />

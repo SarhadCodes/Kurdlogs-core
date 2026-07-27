@@ -29,8 +29,8 @@ irm https://kurdlogs-core.sarhadyt.workers.dev/install.ps1 | iex
 This downloads a compose file + pulls binary images from GHCR. It never clones this repository.
 
 Default panel: `http://localhost:8081`  
-Login: `admin` / **one-time password printed by the installer** (also in `.env` as `ADMIN_INITIAL_PASSWORD`).  
-After first login you must change the password and enable MFA.
+Login: `admin` / **strong password printed by the installer** (also in `.env` as `ADMIN_INITIAL_PASSWORD`).  
+Changing the password or enabling MFA in Settings is optional.
 
 ## Features
 
@@ -65,8 +65,8 @@ Local development still uses `docker compose build` from this repo.
 
 ## Default Credentials
 - **User:** `admin`
-- **Pass:** random per install — shown at the end of the CLI installer (not `admin123`)
-- **After login:** change password (≥12 chars) and set up MFA for ADMIN
+- **Pass:** strong random password printed by the installer (also in `.env` as `ADMIN_INITIAL_PASSWORD`)
+- **Optional:** change password or enable MFA anytime in Settings
 
 ## License
 

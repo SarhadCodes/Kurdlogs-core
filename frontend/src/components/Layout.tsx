@@ -22,6 +22,7 @@ import {
 import { useAuthStore } from '../stores/authStore';
 import InstallAppBanner from './InstallAppBanner';
 import ConfirmDialog from './ConfirmDialog';
+import OnboardingTour from './OnboardingTour';
 import { resolveAvatarUrl, userDisplayName, userInitials } from '../utils/userProfile';
 import { useSidebarCollapsed } from '@/hooks/useSidebarCollapsed';
 import { Button } from '@/components/ui/button';
@@ -81,6 +82,7 @@ function NavItems({
             end={item.to === '/'}
             onClick={onNavigate}
             title={collapsed ? undefined : item.label}
+            data-tour-nav={item.to}
             className={({ isActive }) =>
               cn(
                 'flex items-center rounded-md text-sm font-medium transition-colors duration-200',
@@ -356,6 +358,8 @@ export default function Layout({ children }: LayoutProps) {
           <InstallAppBanner />
           {children}
         </main>
+
+        <OnboardingTour />
 
         <ConfirmDialog
           isOpen={logoutOpen}

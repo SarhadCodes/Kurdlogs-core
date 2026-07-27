@@ -184,12 +184,11 @@ docker compose ps frontend backend nginx-rtmp
 Write-KlBlank
 Show-KlOk "Panel URL  http://localhost:$port"
 
-$loginHint = 'admin / (see ADMIN_INITIAL_PASSWORD in .env)'
+$adminPw = $null
 if (Test-Path (Join-Path $PSScriptRoot '.env')) {
   $adminLine = Get-Content (Join-Path $PSScriptRoot '.env') | Where-Object { $_ -match '^ADMIN_INITIAL_PASSWORD=' } | Select-Object -First 1
   if ($adminLine) {
     $adminPw = ($adminLine -replace '^ADMIN_INITIAL_PASSWORD=', '').Trim()
-    if ($adminPw) { $loginHint = "admin / $adminPw" }
   }
 }
 
@@ -197,9 +196,13 @@ if (Test-Path (Join-Path $PSScriptRoot '.env')) {
 Write-KlBlank
 Write-Kl ("$MINT" + '  ██████████████████████████████████████████████████████' + $R)
 Write-Kl ("$PEARL$B" + '   KURDLOGS CORE  ·  DEPLOY COMPLETE' + $R)
-Write-Kl ("$MUTED" + "   open  →  http://localhost:$port" + $R)
-Write-Kl ("$MUTED" + "   login →  $loginHint" + $R)
-Write-Kl ("$MUTED" + '   note  →  change password + enable MFA after first login' + $R)
-Write-Kl ("$MUTED" + '   tip   →  hard refresh (Ctrl+Shift+R) after first build' + $R)
+Write-Kl ("$MUTED" + "   open      →  http://localhost:$port" + $R)
+Write-Kl ("$MUTED" + "   username →  admin" + $R)
+if ($adminPw) {
+  Write-Kl ("$MUTED" + "   password →  $adminPw" + $R)
+} else {
+  Write-Kl ("$MUTED" + '   password →  (see ADMIN_INITIAL_PASSWORD in .env)' + $R)
+}
+Write-Kl ("$MUTED" + '   tip      →  hard refresh (Ctrl+Shift+R) after first build' + $R)
 Write-Kl ("$MINT" + '  ██████████████████████████████████████████████████████' + $R)
 Write-KlBlank

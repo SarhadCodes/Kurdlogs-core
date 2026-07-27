@@ -29,15 +29,15 @@ async function main() {
         username: 'admin',
         passwordHash,
         role: 'ADMIN',
-        mustChangePassword: true,
+        mustChangePassword: false,
         mfaEnabled: false,
       },
     });
 
     logger.info('Created default admin user (username: admin)');
     logger.info('============================================================');
-    logger.info(`INITIAL ADMIN PASSWORD: ${password}`);
-    logger.info('Sign in, then change password and enable MFA immediately.');
+    logger.info(`ADMIN PASSWORD: ${password}`);
+    logger.info('Also printed by the installer and stored as ADMIN_INITIAL_PASSWORD.');
     logger.info('============================================================');
   } else {
     logger.info('Admin user already exists');

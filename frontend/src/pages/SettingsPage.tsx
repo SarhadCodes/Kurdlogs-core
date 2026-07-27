@@ -12,6 +12,7 @@ import {
   RefreshCw,
   CheckCircle2,
   Camera,
+  Compass,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { authApi, monitorApi } from '../services/api';
@@ -25,6 +26,7 @@ import toast from 'react-hot-toast';
 import type { SystemStats } from '../types';
 import { resolveAvatarUrl, userDisplayName, userInitials } from '../utils/userProfile';
 import { BUILD_VERSION } from '../config/buildVersion';
+import { requestOnboardingRestart } from '@/hooks/useOnboardingTour';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -433,11 +435,6 @@ export default function SettingsPage() {
                         You must change this password before using the panel.
                       </p>
                     )}
-                    {user?.mfaRequired && !user?.mfaEnabled && !user?.mustChangePassword && (
-                      <p className="text-xs text-amber-300/90">
-                        Multi-factor authentication is required for your role. Set it up below.
-                      </p>
-                    )}
 
                     <div className="flex flex-wrap gap-2">
                       <Button type="submit" disabled={savingProfile}>
@@ -519,9 +516,7 @@ export default function SettingsPage() {
                   <p className="mt-1 text-xs text-muted-foreground">
                     {user?.mfaEnabled
                       ? 'MFA is enabled. Authenticator codes are required at sign-in.'
-                      : user?.mfaRequired
-                        ? 'Required for admin accounts. Scan a QR code with Google Authenticator, Authy, or similar.'
-                        : 'Optional for your role. Improves account security.'}
+                      : 'Optional. Scan a QR code with Google Authenticator, Authy, or similar when you want extra protection.'}
                   </p>
                 </div>
 
@@ -637,7 +632,7 @@ export default function SettingsPage() {
 
                     <form onSubmit={handleMfaDisable} className="space-y-3">
                       <p className="text-xs text-muted-foreground">
-                        Disable only if needed. Admin roles will be asked to set MFA up again.
+                        Disable MFA if you no longer want a second sign-in step.
                       </p>
                       <PasswordField
                         id="mfa-disable-password"
@@ -668,6 +663,23 @@ export default function SettingsPage() {
 
           <div className="xl:col-span-2 space-y-6">
             <InstallAppCard />
+
+            <SettingsCard title="Panel guide" description="Walk through every section of the panel" icon={Compass}>
+              <p className="text-sm text-muted-foreground leading-relaxed">
+                Reopen the step-by-step tour that explains Dashboard, Channels, Playlists, and the rest of the panel.
+              </p>
+              <Button
+                type="button"
+                variant="secondary"
+                className="mt-4"
+                onClick={() => {
+                  requestOnboardingRestart();
+                  toast.success('Panel guide started');
+                }}
+              >
+                Restart panel guide
+              </Button>
+            </SettingsCard>
 
             <SettingsCard title="About KurdLogs Core" description="Media server control panel" icon={Server}>
               <div className="space-y-4">

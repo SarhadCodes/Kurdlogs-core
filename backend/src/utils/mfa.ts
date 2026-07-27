@@ -63,6 +63,7 @@ export function consumeBackupCode(
   return hashes.filter((_, i) => i !== idx);
 }
 
-export function rolesRequiringMfa(role: string): boolean {
-  return role === 'ADMIN' || role === 'SUPERVISOR';
+/** MFA is recommended for privileged roles but not forced after install. */
+export function rolesRequiringMfa(_role: string): boolean {
+  return false;
 }
