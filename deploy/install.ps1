@@ -5,7 +5,7 @@
 param(
   [string]$InstallDir = $(Join-Path $env:LOCALAPPDATA 'KurdLogs-Core'),
   [string]$DistBase = 'https://kurdlogs-core.sarhadyt.workers.dev',
-  [string]$ImageTag = 'latest',
+  [string]$ImageTag = '1.2.0',
   [int]$HttpPort = 8081
 )
 
@@ -102,6 +102,7 @@ RTMP_PUBLISH_PORT=1936
 MCR_RTMP_PORT=1936
 TOKEN_OVERLAP_SECONDS=120
 TOKEN_REFRESH_AHEAD_SECONDS=90
+KURDLOGS_RELEASE=$ImageTag
 KURDLOGS_IMAGE_BACKEND=ghcr.io/sarhadcodes/kurdlogs-core-backend:$ImageTag
 KURDLOGS_IMAGE_FRONTEND=ghcr.io/sarhadcodes/kurdlogs-core-frontend:$ImageTag
 KURDLOGS_IMAGE_NGINX=ghcr.io/sarhadcodes/kurdlogs-core-nginx:$ImageTag
@@ -119,13 +120,20 @@ KURDLOGS_IMAGE_NGINX=ghcr.io/sarhadcodes/kurdlogs-core-nginx:$ImageTag
   }
 }
 
+# Always pin compose to the requested release images (fresh pull on reinstall).
+Set-KlEnvValue $envPath 'KURDLOGS_RELEASE' $ImageTag
+Set-KlEnvValue $envPath 'KURDLOGS_IMAGE_BACKEND' "ghcr.io/sarhadcodes/kurdlogs-core-backend:$ImageTag"
+Set-KlEnvValue $envPath 'KURDLOGS_IMAGE_FRONTEND' "ghcr.io/sarhadcodes/kurdlogs-core-frontend:$ImageTag"
+Set-KlEnvValue $envPath 'KURDLOGS_IMAGE_NGINX' "ghcr.io/sarhadcodes/kurdlogs-core-nginx:$ImageTag"
+Write-Ok "Release images set to $ImageTag"
+
 Write-Step '04' "Pull binary images"
 docker compose pull
 if ($LASTEXITCODE -ne 0) {
   $needed = @(
-    'ghcr.io/sarhadcodes/kurdlogs-core-backend:latest',
-    'ghcr.io/sarhadcodes/kurdlogs-core-frontend:latest',
-    'ghcr.io/sarhadcodes/kurdlogs-core-nginx:latest'
+    "ghcr.io/sarhadcodes/kurdlogs-core-backend:$ImageTag",
+    "ghcr.io/sarhadcodes/kurdlogs-core-frontend:$ImageTag",
+    "ghcr.io/sarhadcodes/kurdlogs-core-nginx:$ImageTag"
   )
   $missing = @()
   foreach ($img in $needed) {
@@ -153,12 +161,13 @@ $($missing -join "`n")
 }
 
 Write-Step '05' "Start KurdLogs Core"
-docker compose up -d
+docker compose up -d --pull always --force-recreate
 if ($LASTEXITCODE -ne 0) { throw 'docker compose up failed' }
 Write-Ok 'Services started'
 
 Write-Host ""
 Write-Host "  INSTALL COMPLETE" -ForegroundColor Green
+Write-Host "  release  →  $ImageTag"
 Write-Host "  open      →  http://localhost:$HttpPort"
 Write-Host "  username →  admin"
 Write-Host "  password →  $adminPasswordShown" -ForegroundColor Yellow

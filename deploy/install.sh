@@ -20,7 +20,7 @@ PROMPT="${ESC}[38;2;167;139;250m"
 
 DIST_BASE="${KURDLOGS_DIST_BASE:-https://kurdlogs-core.sarhadyt.workers.dev}"
 INSTALL_DIR="${KURDLOGS_INSTALL_DIR:-/opt/kurdlogs-core}"
-IMAGE_TAG="${KURDLOGS_IMAGE_TAG:-latest}"
+IMAGE_TAG="${KURDLOGS_IMAGE_TAG:-1.2.0}"
 
 banner() {
   clear 2>/dev/null || true
@@ -60,6 +60,19 @@ rand_hex() {
     openssl rand -hex "$1"
   else
     tr -dc 'a-f0-9' </dev/urandom | head -c $(( "$1" * 2 ))
+  fi
+}
+
+set_env_value() {
+  local key="$1"
+  local value="$2"
+  if grep -qE "^${key}=" .env 2>/dev/null; then
+    local tmpfile
+    tmpfile="$(mktemp)"
+    sed "s|^${key}=.*|${key}=${value}|" .env > "$tmpfile"
+    mv "$tmpfile" .env
+  else
+    printf '\n%s=%s\n' "$key" "$value" >> .env
   fi
 }
 
@@ -123,6 +136,7 @@ RTMP_PUBLISH_PORT=1936
 MCR_RTMP_PORT=1936
 TOKEN_OVERLAP_SECONDS=120
 TOKEN_REFRESH_AHEAD_SECONDS=90
+KURDLOGS_RELEASE=${IMAGE_TAG}
 KURDLOGS_IMAGE_BACKEND=ghcr.io/sarhadcodes/kurdlogs-core-backend:${IMAGE_TAG}
 KURDLOGS_IMAGE_FRONTEND=ghcr.io/sarhadcodes/kurdlogs-core-frontend:${IMAGE_TAG}
 KURDLOGS_IMAGE_NGINX=ghcr.io/sarhadcodes/kurdlogs-core-nginx:${IMAGE_TAG}
@@ -145,6 +159,12 @@ else
     info ".env already exists — keeping your settings"
   fi
 fi
+
+set_env_value "KURDLOGS_RELEASE" "${IMAGE_TAG}"
+set_env_value "KURDLOGS_IMAGE_BACKEND" "ghcr.io/sarhadcodes/kurdlogs-core-backend:${IMAGE_TAG}"
+set_env_value "KURDLOGS_IMAGE_FRONTEND" "ghcr.io/sarhadcodes/kurdlogs-core-frontend:${IMAGE_TAG}"
+set_env_value "KURDLOGS_IMAGE_NGINX" "ghcr.io/sarhadcodes/kurdlogs-core-nginx:${IMAGE_TAG}"
+info "Release images set to ${IMAGE_TAG}"
 ok "Environment ready"
 
 step "05" "Pull binary images"
@@ -171,14 +191,15 @@ else
 fi
 
 step "06" "Start KurdLogs Core"
-cmd "docker compose up -d"
-docker compose up -d
+cmd "docker compose up -d --pull always --force-recreate"
+docker compose up -d --pull always --force-recreate
 ok "Services started"
 
 BASE_URL="http://${PUBLIC_IP}:${HTTP_PORT}"
 echo ""
 echo -e "${MINT}  ██████████████████████████████████████████████████████${R}"
 echo -e "${PEARL}${B}   KURDLOGS CORE  ·  INSTALL COMPLETE${R}"
+echo -e "${MUTED}   release  →  ${IMAGE_TAG}${R}"
 echo -e "${MUTED}   open      →  ${BASE_URL}${R}"
 echo -e "${MUTED}   username →  admin${R}"
 echo -e "${AMBER}   password →  ${ADMIN_PASSWORD_SHOWN}${R}"
