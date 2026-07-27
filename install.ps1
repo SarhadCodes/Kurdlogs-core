@@ -78,6 +78,16 @@ function Set-KlEnvValue([string]$Path, [string]$Key, [string]$Value) {
   [System.IO.File]::WriteAllText($Path, $raw, $utf8NoBom)
 }
 
+function Test-KlTcpPortInUse([int]$Port) {
+  try {
+    $client = New-Object System.Net.Sockets.TcpClient('127.0.0.1', $Port)
+    $client.Close()
+    return $true
+  } catch {
+    return $false
+  }
+}
+
 $adminPasswordShown = $null
 if (-not (Test-Path $envPath)) {
   $bytes = New-Object byte[] 24
@@ -126,6 +136,27 @@ Set-KlEnvValue $envPath 'KURDLOGS_IMAGE_BACKEND' "ghcr.io/sarhadcodes/kurdlogs-c
 Set-KlEnvValue $envPath 'KURDLOGS_IMAGE_FRONTEND' "ghcr.io/sarhadcodes/kurdlogs-core-frontend:$ImageTag"
 Set-KlEnvValue $envPath 'KURDLOGS_IMAGE_NGINX' "ghcr.io/sarhadcodes/kurdlogs-core-nginx:$ImageTag"
 Write-Ok "Release images set to $ImageTag"
+
+# KurdLogs RTMP must stay off 1935 (Flussonic). Reinstalls with an old .env may still have 1935.
+Set-KlEnvValue $envPath 'RTMP_PUBLISH_PORT' '1936'
+Set-KlEnvValue $envPath 'MCR_RTMP_PORT' '1936'
+Set-KlEnvValue $envPath 'HTTP_PORT' "$HttpPort"
+Set-KlEnvValue $envPath 'PUBLIC_BASE_URL' "http://localhost:$HttpPort"
+Write-Ok 'RTMP ingest pinned to port 1936 (avoids Flussonic on 1935)'
+
+$rtmpPort = [int](Get-KlEnvValue $envPath 'RTMP_PUBLISH_PORT')
+if (Test-KlTcpPortInUse $rtmpPort) {
+  Write-Host "  ! Port $rtmpPort is already in use on this machine — nginx-rtmp may fail to start." -ForegroundColor Yellow
+}
+if (Test-KlTcpPortInUse $HttpPort) {
+  $owner = Get-NetTCPConnection -LocalPort $HttpPort -State Listen -ErrorAction SilentlyContinue | Select-Object -First 1
+  if ($owner -and $owner.OwningProcess -ne 0) {
+    $proc = Get-Process -Id $owner.OwningProcess -ErrorAction SilentlyContinue
+    if ($proc -and $proc.ProcessName -notmatch 'com\.docker|wsl|vmmem') {
+      Write-Host "  ! Port $HttpPort is already in use — the panel may not load." -ForegroundColor Yellow
+    }
+  }
+}
 
 Write-Step '04' "Pull binary images"
 docker compose pull
@@ -194,6 +225,17 @@ if ($adminPasswordShown) {
     Write-Host '  ! Could not sync admin password yet — wait a minute and run:' -ForegroundColor Yellow
     Write-Host "    docker compose exec -T backend node dist/scripts/reset-admin.js `"$adminPasswordShown`"" -ForegroundColor DarkGray
   }
+}
+
+Start-Sleep -Seconds 3
+$backendState = (docker compose ps backend --format '{{.State}}' 2>$null | Select-Object -First 1).Trim()
+$rtmpState = (docker compose ps nginx-rtmp --format '{{.State}}' 2>$null | Select-Object -First 1).Trim()
+if ($backendState -ne 'running') {
+  Write-Host '  ! Backend is not running — login will show 502. Check: docker compose logs backend' -ForegroundColor Yellow
+}
+if ($rtmpState -ne 'running') {
+  Write-Host '  ! nginx-rtmp is not running — RTMP ingest is down. Check: docker compose logs nginx-rtmp' -ForegroundColor Yellow
+  Write-Host '    If you see port 1935 in the error, re-run this installer (RTMP is now pinned to 1936).' -ForegroundColor DarkGray
 }
 
 Write-Ok 'Services started'

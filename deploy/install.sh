@@ -76,6 +76,17 @@ set_env_value() {
   fi
 }
 
+port_in_use() {
+  local port="$1"
+  if command -v ss >/dev/null 2>&1; then
+    ss -ltn 2>/dev/null | grep -q ":${port} "
+  elif command -v netstat >/dev/null 2>&1; then
+    netstat -ltn 2>/dev/null | grep -q ":${port} "
+  else
+    (echo >/dev/tcp/127.0.0.1/"${port}") >/dev/null 2>&1
+  fi
+}
+
 banner
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
@@ -165,6 +176,19 @@ set_env_value "KURDLOGS_IMAGE_BACKEND" "ghcr.io/sarhadcodes/kurdlogs-core-backen
 set_env_value "KURDLOGS_IMAGE_FRONTEND" "ghcr.io/sarhadcodes/kurdlogs-core-frontend:${IMAGE_TAG}"
 set_env_value "KURDLOGS_IMAGE_NGINX" "ghcr.io/sarhadcodes/kurdlogs-core-nginx:${IMAGE_TAG}"
 info "Release images set to ${IMAGE_TAG}"
+
+# KurdLogs RTMP must stay off 1935 (Flussonic). Reinstalls with an old .env may still have 1935.
+set_env_value "RTMP_PUBLISH_PORT" "1936"
+set_env_value "MCR_RTMP_PORT" "1936"
+set_env_value "HTTP_PORT" "${HTTP_PORT}"
+set_env_value "PUBLIC_BASE_URL" "http://${PUBLIC_IP}:${HTTP_PORT}"
+info "RTMP ingest pinned to port 1936 (avoids Flussonic on 1935)"
+if port_in_use 1936; then
+  fail "Port 1936 is already in use on this machine — nginx-rtmp may fail to start."
+fi
+if port_in_use "${HTTP_PORT}"; then
+  info "Port ${HTTP_PORT} is already in use — the panel may not load."
+fi
 ok "Environment ready"
 
 step "05" "Pull binary images"
@@ -221,6 +245,17 @@ if [ -n "${ADMIN_PASSWORD_SHOWN}" ]; then
     fail "Could not sync admin password yet — wait a minute and run:"
     info "docker compose exec -T backend node dist/scripts/reset-admin.js \"${ADMIN_PASSWORD_SHOWN}\""
   fi
+fi
+
+sleep 3
+backend_state="$(docker compose ps backend --format '{{.State}}' 2>/dev/null | head -n1 | tr -d '\r')"
+rtmp_state="$(docker compose ps nginx-rtmp --format '{{.State}}' 2>/dev/null | head -n1 | tr -d '\r')"
+if [ "${backend_state}" != "running" ]; then
+  fail "Backend is not running — login will show 502. Check: docker compose logs backend"
+fi
+if [ "${rtmp_state}" != "running" ]; then
+  fail "nginx-rtmp is not running — RTMP ingest is down. Check: docker compose logs nginx-rtmp"
+  info "If you see port 1935 in the error, re-run this installer (RTMP is now pinned to 1936)."
 fi
 
 ok "Services started"
