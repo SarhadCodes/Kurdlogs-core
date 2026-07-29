@@ -844,7 +844,10 @@ class FfmpegService {
       {
         continueAppend,
         listSize: options?.prewarm ? 6 : undefined,
-        eventPlaylist: options?.prewarm || playbackSource === 'BLUEPRINT',
+        // Blueprint is a live channel too. An EVENT playlist grows forever,
+        // eventually forcing players to scan thousands of stale segments and
+        // exhausting disk space. Reserve it for the short-lived prewarm job.
+        eventPlaylist: options?.prewarm,
       }
     );
 
