@@ -18,6 +18,12 @@ const commandId = () => {
 type LogoLayout = { x: number; y: number; width: number; height: number; opacity: number };
 const DEFAULT_LAYOUT: LogoLayout = { x: 1056, y: 24, width: 200, height: 100, opacity: 0.9 };
 const number = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+const renderedLogoSize = (layout: Pick<LogoLayout, 'width' | 'height'>, aspectRatio: number) => {
+  const aspect = Number.isFinite(aspectRatio) && aspectRatio > 0 ? aspectRatio : 1;
+  return layout.width / layout.height > aspect
+    ? { width: layout.height * aspect, height: layout.height }
+    : { width: layout.width, height: layout.width / aspect };
+};
 
 function publicAssetUrl(asset?: GraphicsAsset | null): string | null {
   if (!asset) return null;
@@ -32,19 +38,25 @@ export default function ChannelGraphicsPanel({ channelId }: { channelId: string 
   const [assetId, setAssetId] = useState('');
   const [mode, setMode] = useState<GraphicsMode>('PLAYER');
   const [layout, setLayout] = useState<LogoLayout>(DEFAULT_LAYOUT);
+  const [assetAspectRatio, setAssetAspectRatio] = useState(1);
   const [busy, setBusy] = useState(false);
   const previewRef = useRef<HTMLDivElement>(null);
   const dragOffsetRef = useRef<{ x: number; y: number } | null>(null);
 
   const selectedAsset = useMemo(() => assets.find((asset) => asset.id === assetId) || null, [assets, assetId]);
+  const displayedLogo = renderedLogoSize(layout, assetAspectRatio);
   const updateLayout = (key: keyof LogoLayout, raw: number) => {
     setLayout((current) => {
       const value = Number.isFinite(raw) ? raw : current[key];
       if (key === 'opacity') return { ...current, opacity: Math.min(1, Math.max(0, value)) };
-      if (key === 'width') return { ...current, width: Math.min(CANVAS.width, Math.max(20, value)), x: Math.min(current.x, CANVAS.width - Math.max(20, value)) };
-      if (key === 'height') return { ...current, height: Math.min(CANVAS.height, Math.max(20, value)), y: Math.min(current.y, CANVAS.height - Math.max(20, value)) };
-      if (key === 'x') return { ...current, x: Math.min(CANVAS.width - current.width, Math.max(0, value)) };
-      return { ...current, y: Math.min(CANVAS.height - current.height, Math.max(0, value)) };
+      if (key === 'width' || key === 'height') {
+        const next = { ...current, [key]: Math.min(key === 'width' ? CANVAS.width : CANVAS.height, Math.max(20, value)) };
+        const visible = renderedLogoSize(next, assetAspectRatio);
+        return { ...next, x: Math.min(next.x, CANVAS.width - visible.width), y: Math.min(next.y, CANVAS.height - visible.height) };
+      }
+      const visible = renderedLogoSize(current, assetAspectRatio);
+      if (key === 'x') return { ...current, x: Math.min(CANVAS.width - visible.width, Math.max(0, value)) };
+      return { ...current, y: Math.min(CANVAS.height - visible.height, Math.max(0, value)) };
     });
   };
 
@@ -67,8 +79,8 @@ export default function ChannelGraphicsPanel({ channelId }: { channelId: string 
     const y = ((event.clientY - frame.top) / frame.height) * CANVAS.height - offset.y;
     setLayout((current) => ({
       ...current,
-      x: Math.min(CANVAS.width - current.width, Math.max(0, x)),
-      y: Math.min(CANVAS.height - current.height, Math.max(0, y)),
+      x: Math.min(CANVAS.width - renderedLogoSize(current, assetAspectRatio).width, Math.max(0, x)),
+      y: Math.min(CANVAS.height - renderedLogoSize(current, assetAspectRatio).height, Math.max(0, y)),
     }));
   };
 
@@ -172,7 +184,7 @@ export default function ChannelGraphicsPanel({ channelId }: { channelId: string 
           <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.08)_1px,transparent_1px)] [background-size:12.5%_16.666%]" />
           <div className="absolute left-4 top-3 rounded bg-red-500 px-2 py-1 text-[10px] font-bold tracking-wide text-white">LIVE PREVIEW</div>
           <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/65 to-transparent" />
-          {previewUrl ? <img src={previewUrl} alt="Drag logo to position it" title="Drag to position the logo" onPointerDown={beginLogoDrag} onPointerMove={moveLogo} onPointerUp={endLogoDrag} onPointerCancel={endLogoDrag} className="absolute touch-none select-none object-contain cursor-grab active:cursor-grabbing" draggable={false} style={{ left: `${(layout.x / CANVAS.width) * 100}%`, top: `${(layout.y / CANVAS.height) * 100}%`, width: `${(layout.width / CANVAS.width) * 100}%`, height: `${(layout.height / CANVAS.height) * 100}%`, opacity: layout.opacity }} /> : <div className="absolute inset-0 grid place-items-center text-center text-sm text-muted-foreground">Select or upload a logo to preview it</div>}
+          {previewUrl ? <img src={previewUrl} alt="Drag logo to position it" title="Drag to position the logo" onLoad={(event) => { const { naturalWidth, naturalHeight } = event.currentTarget; if (naturalWidth && naturalHeight) setAssetAspectRatio(naturalWidth / naturalHeight); }} onPointerDown={beginLogoDrag} onPointerMove={moveLogo} onPointerUp={endLogoDrag} onPointerCancel={endLogoDrag} className="absolute touch-none select-none cursor-grab active:cursor-grabbing" draggable={false} style={{ left: `${(layout.x / CANVAS.width) * 100}%`, top: `${(layout.y / CANVAS.height) * 100}%`, width: `${(displayedLogo.width / CANVAS.width) * 100}%`, height: `${(displayedLogo.height / CANVAS.height) * 100}%`, opacity: layout.opacity }} /> : <div className="absolute inset-0 grid place-items-center text-center text-sm text-muted-foreground">Select or upload a logo to preview it</div>}
           <div className="absolute bottom-3 left-4 text-xs font-medium text-white/80">Channel program</div>
         </div>
       </section>
@@ -180,13 +192,13 @@ export default function ChannelGraphicsPanel({ channelId }: { channelId: string 
       <section className="space-y-4 rounded-lg border border-border bg-background/40 p-4">
         <div className="flex items-center gap-2 text-sm font-medium"><Move className="h-4 w-4 text-muted-foreground" /> Placement & size</div><p className="-mt-2 text-xs text-muted-foreground">Drag the logo in the preview for free placement.</p>
         <div className="grid grid-cols-2 gap-3">
-          <label className="text-xs text-muted-foreground">X position<Input className={fieldClass} type="number" min="0" max={CANVAS.width - layout.width} value={layout.x} onChange={(e) => updateLayout('x', Number(e.target.value))} /></label>
-          <label className="text-xs text-muted-foreground">Y position<Input className={fieldClass} type="number" min="0" max={CANVAS.height - layout.height} value={layout.y} onChange={(e) => updateLayout('y', Number(e.target.value))} /></label>
+          <label className="text-xs text-muted-foreground">X position<Input className={fieldClass} type="number" min="0" max={CANVAS.width - displayedLogo.width} value={layout.x} onChange={(e) => updateLayout('x', Number(e.target.value))} /></label>
+          <label className="text-xs text-muted-foreground">Y position<Input className={fieldClass} type="number" min="0" max={CANVAS.height - displayedLogo.height} value={layout.y} onChange={(e) => updateLayout('y', Number(e.target.value))} /></label>
           <label className="text-xs text-muted-foreground">Width<Input className={fieldClass} type="number" min="20" max={CANVAS.width} value={layout.width} onChange={(e) => updateLayout('width', Number(e.target.value))} /></label>
           <label className="text-xs text-muted-foreground">Height<Input className={fieldClass} type="number" min="20" max={CANVAS.height} value={layout.height} onChange={(e) => updateLayout('height', Number(e.target.value))} /></label>
         </div>
         <label className="block text-xs text-muted-foreground">Opacity <span className="float-right text-foreground">{Math.round(layout.opacity * 100)}%</span><input className="mt-2 w-full accent-emerald-400" type="range" min="0" max="1" step="0.05" value={layout.opacity} onChange={(e) => updateLayout('opacity', Number(e.target.value))} /></label>
-        <div><p className="mb-2 text-xs text-muted-foreground">Quick position</p><div className="grid grid-cols-2 gap-2"><Button type="button" size="sm" variant="outline" onClick={() => place(24, 24)}>Top left</Button><Button type="button" size="sm" variant="outline" onClick={() => place(CANVAS.width - layout.width - 24, 24)}>Top right</Button><Button type="button" size="sm" variant="outline" onClick={() => place(24, CANVAS.height - layout.height - 24)}>Bottom left</Button><Button type="button" size="sm" variant="outline" onClick={() => place(CANVAS.width - layout.width - 24, CANVAS.height - layout.height - 24)}>Bottom right</Button></div></div>
+        <div><p className="mb-2 text-xs text-muted-foreground">Quick position</p><div className="grid grid-cols-2 gap-2"><Button type="button" size="sm" variant="outline" onClick={() => place(24, 24)}>Top left</Button><Button type="button" size="sm" variant="outline" onClick={() => place(CANVAS.width - displayedLogo.width - 24, 24)}>Top right</Button><Button type="button" size="sm" variant="outline" onClick={() => place(24, CANVAS.height - displayedLogo.height - 24)}>Bottom left</Button><Button type="button" size="sm" variant="outline" onClick={() => place(CANVAS.width - displayedLogo.width - 24, CANVAS.height - displayedLogo.height - 24)}>Bottom right</Button></div></div>
         <Button type="button" size="sm" variant="ghost" className="w-full" onClick={() => setLayout(DEFAULT_LAYOUT)}><RotateCcw className="mr-2 h-3.5 w-3.5" />Reset layout</Button>
       </section>
     </div>
