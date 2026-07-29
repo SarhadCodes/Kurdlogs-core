@@ -13,9 +13,11 @@ import {
   CheckCircle2,
   Camera,
   Compass,
+  UserPlus,
+  Trash2,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { authApi, monitorApi } from '../services/api';
+import { authApi, monitorApi, type SecondaryUser } from '../services/api';
 import { useAuthStore } from '../stores/authStore';
 import Layout from '../components/Layout';
 import PageHeader from '../components/PageHeader';
@@ -150,6 +152,13 @@ export default function SettingsPage() {
   const [regenCode, setRegenCode] = useState('');
   const [showRegenForm, setShowRegenForm] = useState(false);
   const [regenBusy, setRegenBusy] = useState(false);
+  const [secondaryUsers, setSecondaryUsers] = useState<SecondaryUser[]>([]);
+  const [secondaryLoading, setSecondaryLoading] = useState(false);
+  const [secondaryBusy, setSecondaryBusy] = useState(false);
+  const [secondaryUsername, setSecondaryUsername] = useState('');
+  const [secondaryDisplayName, setSecondaryDisplayName] = useState('');
+  const [secondaryPassword, setSecondaryPassword] = useState('');
+  const [showSecondaryPassword, setShowSecondaryPassword] = useState(false);
 
   useEffect(() => {
     setDisplayName(user?.displayName || '');
@@ -185,6 +194,63 @@ export default function SettingsPage() {
   useEffect(() => {
     loadSystemStats();
   }, [loadSystemStats]);
+
+  const loadSecondaryUsers = useCallback(async () => {
+    if (user?.role !== 'ADMIN') return;
+    setSecondaryLoading(true);
+    try {
+      const response = await authApi.getSecondaryUsers();
+      setSecondaryUsers(response.data || []);
+    } catch (error: any) {
+      toast.error(error?.message || 'Failed to load secondary accounts');
+    } finally {
+      setSecondaryLoading(false);
+    }
+  }, [user?.role]);
+
+  useEffect(() => {
+    loadSecondaryUsers();
+  }, [loadSecondaryUsers]);
+
+  const handleCreateSecondaryUser = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (secondaryUsers.length >= 3) return;
+    if (!secondaryUsername.trim() || !secondaryPassword) {
+      toast.error('Enter a username and password');
+      return;
+    }
+    setSecondaryBusy(true);
+    try {
+      await authApi.createSecondaryUser({
+        username: secondaryUsername.trim(),
+        password: secondaryPassword,
+        displayName: secondaryDisplayName.trim() || undefined,
+      });
+      setSecondaryUsername('');
+      setSecondaryDisplayName('');
+      setSecondaryPassword('');
+      toast.success('Secondary account created');
+      await loadSecondaryUsers();
+    } catch (error: any) {
+      toast.error(error?.message || 'Could not create secondary account');
+    } finally {
+      setSecondaryBusy(false);
+    }
+  };
+
+  const handleDeleteSecondaryUser = async (account: SecondaryUser) => {
+    if (!window.confirm(`Remove login access for ${account.username}?`)) return;
+    setSecondaryBusy(true);
+    try {
+      await authApi.deleteSecondaryUser(account.id);
+      toast.success('Secondary account removed');
+      await loadSecondaryUsers();
+    } catch (error: any) {
+      toast.error(error?.message || 'Could not remove secondary account');
+    } finally {
+      setSecondaryBusy(false);
+    }
+  };
 
   const handleSaveProfile = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -454,6 +520,63 @@ export default function SettingsPage() {
                 </div>
               </form>
             </SettingsCard>
+
+            {user?.role === 'ADMIN' && (
+              <SettingsCard
+                title="Secondary account access"
+                description="Create up to three operator logins for people who help manage this panel"
+                icon={UserPlus}
+              >
+                <div className="mb-5 flex items-center justify-between rounded-xl border border-border bg-muted/20 px-4 py-3">
+                  <div>
+                    <p className="text-sm font-medium">{secondaryUsers.length} of 3 accounts in use</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Each account can sign in with its own username and password.</p>
+                  </div>
+                  <Button type="button" size="sm" variant="outline" onClick={loadSecondaryUsers} disabled={secondaryLoading}>
+                    <RefreshCw className={`mr-2 h-3.5 w-3.5 ${secondaryLoading ? 'animate-spin' : ''}`} />Refresh
+                  </Button>
+                </div>
+
+                <div className="space-y-2">
+                  {secondaryUsers.map((account) => (
+                    <div key={account.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-background/50 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium">{account.displayName || account.username}</p>
+                        <p className="text-xs text-muted-foreground">@{account.username} · operator</p>
+                      </div>
+                      <Button type="button" size="sm" variant="outline" className="text-red-300 hover:text-red-200" disabled={secondaryBusy} onClick={() => handleDeleteSecondaryUser(account)}>
+                        <Trash2 className="mr-2 h-3.5 w-3.5" />Remove
+                      </Button>
+                    </div>
+                  ))}
+                  {!secondaryLoading && secondaryUsers.length === 0 && (
+                    <p className="rounded-xl border border-dashed border-border px-4 py-5 text-center text-sm text-muted-foreground">No secondary accounts yet.</p>
+                  )}
+                </div>
+
+                {secondaryUsers.length < 3 && (
+                  <form onSubmit={handleCreateSecondaryUser} className="mt-5 grid gap-3 border-t border-border pt-5 sm:grid-cols-2">
+                    <div className="space-y-2">
+                      <Label htmlFor="secondary-display-name">Name (optional)</Label>
+                      <Input id="secondary-display-name" value={secondaryDisplayName} onChange={(event) => setSecondaryDisplayName(event.target.value)} maxLength={64} placeholder="Studio operator" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="secondary-username">Login username</Label>
+                      <Input id="secondary-username" value={secondaryUsername} onChange={(event) => setSecondaryUsername(event.target.value)} minLength={3} maxLength={32} pattern="[A-Za-z0-9._-]+" placeholder="operator.1" required />
+                    </div>
+                    <div className="sm:col-span-2">
+                      <PasswordField id="secondary-password" label="Password" value={secondaryPassword} onChange={setSecondaryPassword} show={showSecondaryPassword} onToggleShow={() => setShowSecondaryPassword((value) => !value)} />
+                      <p className="mt-2 text-xs text-muted-foreground">Minimum 12 characters with uppercase, lowercase, and a number.</p>
+                    </div>
+                    <div className="sm:col-span-2">
+                      <Button type="submit" disabled={secondaryBusy}>
+                        <UserPlus className="mr-2 h-4 w-4" />{secondaryBusy ? 'Creating…' : 'Add secondary account'}
+                      </Button>
+                    </div>
+                  </form>
+                )}
+              </SettingsCard>
+            )}
 
             <SettingsCard
               title="Security"

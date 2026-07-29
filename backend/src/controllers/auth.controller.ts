@@ -41,6 +41,24 @@ function publicUser(user: {
   };
 }
 
+const MAX_SECONDARY_ACCOUNTS = 3;
+
+function publicSecondaryUser(user: {
+  id: string;
+  username: string;
+  displayName?: string | null;
+  role: string;
+  createdAt: Date;
+}) {
+  return {
+    id: user.id,
+    username: user.username,
+    displayName: user.displayName ?? null,
+    role: user.role,
+    createdAt: user.createdAt,
+  };
+}
+
 function signSessionToken(user: { id: string; username: string; role: string }): string {
   const payload: TokenPayload = {
     userId: user.id,
@@ -215,6 +233,61 @@ export const register = async (req: AuthRequest, res: Response) => {
   });
 
   res.status(201).json({ success: true, data: publicUser(user) });
+};
+
+/** The panel owner can issue a small, controlled set of operator logins. */
+export const getSecondaryUsers = async (req: AuthRequest, res: Response) => {
+  if (req.user?.role !== 'ADMIN') throw new AppError('Only administrators can manage account access', 403);
+
+  const users = await prisma.user.findMany({
+    where: { role: { not: 'ADMIN' } },
+    orderBy: { createdAt: 'asc' },
+    select: { id: true, username: true, displayName: true, role: true, createdAt: true },
+  });
+  res.json({ success: true, data: users.map(publicSecondaryUser), limit: MAX_SECONDARY_ACCOUNTS });
+};
+
+export const createSecondaryUser = async (req: AuthRequest, res: Response) => {
+  if (req.user?.role !== 'ADMIN') throw new AppError('Only administrators can manage account access', 403);
+
+  const username = typeof req.body.username === 'string' ? req.body.username.trim() : '';
+  const password = typeof req.body.password === 'string' ? req.body.password : '';
+  const displayName = typeof req.body.displayName === 'string' ? req.body.displayName.trim().slice(0, 64) : '';
+  if (!username) throw new AppError('Username is required', 400);
+  if (!/^[a-zA-Z0-9._-]{3,32}$/.test(username)) {
+    throw new AppError('Username must be 3–32 characters and use only letters, numbers, dots, dashes, or underscores', 400);
+  }
+  assertStrongPassword(password, username);
+
+  const existingCount = await prisma.user.count({ where: { role: { not: 'ADMIN' } } });
+  if (existingCount >= MAX_SECONDARY_ACCOUNTS) {
+    throw new AppError(`Only ${MAX_SECONDARY_ACCOUNTS} secondary accounts are allowed`, 409);
+  }
+  const existing = await prisma.user.findUnique({ where: { username } });
+  if (existing) throw new AppError('That username is already in use', 409);
+
+  const user = await prisma.user.create({
+    data: {
+      username,
+      passwordHash: await bcrypt.hash(password, 12),
+      displayName: displayName || null,
+      role: 'OPERATOR',
+      // Credentials are created by the account owner, so the user can sign in immediately.
+      mustChangePassword: false,
+    },
+    select: { id: true, username: true, displayName: true, role: true, createdAt: true },
+  });
+  res.status(201).json({ success: true, data: publicSecondaryUser(user), limit: MAX_SECONDARY_ACCOUNTS });
+};
+
+export const deleteSecondaryUser = async (req: AuthRequest, res: Response) => {
+  if (req.user?.role !== 'ADMIN') throw new AppError('Only administrators can manage account access', 403);
+  const target = await prisma.user.findUnique({ where: { id: String(req.params.id) } });
+  if (!target) throw new AppError('Account not found', 404);
+  if (target.role === 'ADMIN') throw new AppError('Administrator accounts cannot be removed here', 400);
+
+  await prisma.user.delete({ where: { id: target.id } });
+  res.json({ success: true, message: 'Secondary account removed' });
 };
 
 export const getMe = async (req: AuthRequest, res: Response) => {

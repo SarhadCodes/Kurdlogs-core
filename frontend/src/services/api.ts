@@ -14,6 +14,14 @@ import {
 } from '../types';
 import type { ChannelPlayUrlsData } from '../utils/channelOutputs';
 
+export type SecondaryUser = {
+  id: string;
+  username: string;
+  displayName: string | null;
+  role: string;
+  createdAt: string;
+};
+
 const api = axios.create({
   baseURL: '/api',
   timeout: 30_000,
@@ -87,6 +95,11 @@ export const authApi = {
     api.post<any, ApiResponse<User>>('/auth/mfa/disable', data),
   regenerateBackupCodes: (data: { password: string; code: string }) =>
     api.post<any, ApiResponse<{ backupCodes: string[] }>>('/auth/mfa/backup-codes/regenerate', data),
+  getSecondaryUsers: () =>
+    api.get<any, ApiResponse<SecondaryUser[]> & { limit?: number }>('/auth/secondary-users'),
+  createSecondaryUser: (data: { username: string; password: string; displayName?: string }) =>
+    api.post<any, ApiResponse<SecondaryUser> & { limit?: number }>('/auth/secondary-users', data),
+  deleteSecondaryUser: (id: string) => api.delete<any, ApiResponse>(`/auth/secondary-users/${id}`),
 };
 
 export const channelApi = {
