@@ -48,6 +48,7 @@ services:
       IPTV_API_KEY: ${IPTV_API_KEY:-change-me-iptv-api-key}
       TOKEN_OVERLAP_SECONDS: ${TOKEN_OVERLAP_SECONDS:-120}
       TOKEN_REFRESH_AHEAD_SECONDS: ${TOKEN_REFRESH_AHEAD_SECONDS:-90}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-4096}
       NODE_ENV: production
     volumes:
       - streams_data:/var/streams

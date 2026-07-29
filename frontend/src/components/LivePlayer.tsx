@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, useRef, useEffect, useState, useCallback } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useEffect, useState, useCallback, type ReactNode } from 'react';
 import Hls from 'hls.js';
 import * as dashjs from 'dashjs';
 import { Copy, ExternalLink, WifiOff } from 'lucide-react';
@@ -44,6 +44,8 @@ interface LivePlayerProps {
   waitForVideo?: boolean;
   /** Tighter HLS buffer for monitoring. */
   lowLatency?: boolean;
+  /** Controlled-player graphics layer; does not alter the stream or encoder. */
+  graphicsOverlay?: ReactNode;
 }
 
 function formatQualityLabel(level?: { height?: number; name?: string }): string {
@@ -105,6 +107,7 @@ const LivePlayer = forwardRef<LivePlayerHandle, LivePlayerProps>(function LivePl
     playerId,
     waitForVideo = false,
     lowLatency = false,
+    graphicsOverlay,
   },
   ref
 ) {
@@ -524,6 +527,7 @@ const LivePlayer = forwardRef<LivePlayerHandle, LivePlayerProps>(function LivePl
           {currentQuality.bitrateKbps ? ` · ${currentQuality.bitrateKbps} kbps` : ''}
         </div>
       )}
+      {graphicsOverlay}
     </div>
   );
 });

@@ -60,6 +60,8 @@ export enum WebSocketEvents {
   MCR_SOURCES = 'mcr:sources',
   MCR_SESSION_READY = 'mcr:session-ready',
   HYBRID_STATE = 'hybrid:state',
+  GRAPHICS_STATE = 'graphics:state',
+  GRAPHICS_COMMAND = 'graphics:command',
 }
 
 export interface ViewerLocation {

@@ -175,6 +175,15 @@ export const overlayApi = {
   delete: (id: string) => api.delete<any, ApiResponse>(`/overlays/${id}`),
 };
 
+export const graphicsApi = {
+  get: (channelId: string) => api.get<any, ApiResponse<import('../types').ChannelGraphics | null>>(`/v1/graphics/channels/${channelId}`),
+  save: (channelId: string, data: Record<string, unknown>) => api.put<any, ApiResponse<import('../types').ChannelGraphics>>(`/v1/graphics/channels/${channelId}`, data),
+  publish: (channelId: string, commandId: string) => api.post<any, ApiResponse>(`/v1/graphics/channels/${channelId}/publish`, { commandId }),
+  setVisibility: (channelId: string, visible: boolean, commandId: string) => api.post<any, ApiResponse>(`/v1/graphics/channels/${channelId}/visibility`, { visible, commandId }),
+  getAssets: () => api.get<any, ApiResponse<import('../types').GraphicsAsset[]>>('/v1/graphics/assets'),
+  uploadAsset: (data: FormData) => api.post<any, ApiResponse<import('../types').GraphicsAsset>>('/v1/graphics/assets', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+};
+
 export const transcodingApi = {
   getAll: () => api.get<any, ApiResponse<TranscodingProfile[]>>('/transcoding'),
   create: (data: any) => api.post<any, ApiResponse<TranscodingProfile>>('/transcoding', data),

@@ -35,6 +35,7 @@ export interface BenchmarkReport {
     diskWriteEstimateKbPerSec: number;
   };
   recommendation: string;
+  graphicsMode?: 'none' | 'legacy-static-logo';
 }
 
 class BenchmarkService {
@@ -49,7 +50,7 @@ class BenchmarkService {
     return this.running;
   }
 
-  async run(targetChannels: 1 | 5 | 10 | 20, sampleSeconds = 30): Promise<BenchmarkReport> {
+  async run(targetChannels: 1 | 5 | 10 | 20, sampleSeconds = 30, graphicsMode: 'none' | 'legacy-static-logo' = 'none'): Promise<BenchmarkReport> {
     if (this.running) {
       throw new Error('Benchmark already running');
     }
@@ -59,6 +60,7 @@ class BenchmarkService {
 
     await appLogService.log('BENCHMARK', `Starting benchmark for ${targetChannels} channels`, 'INFO', {
       targetChannels,
+      graphicsMode,
     });
 
     const channels = await prisma.channel.findMany({
@@ -147,6 +149,7 @@ class BenchmarkService {
         diskWriteEstimateKbPerSec: Math.round(diskRate),
       },
       recommendation,
+      graphicsMode,
     };
 
     this.lastReport = report;

@@ -134,7 +134,7 @@ class OverlayService {
   /** Playlist streams use per-video burned logos — skip runtime logo/watermark filters. */
   getPlaylistStreamOverlays(overlays: any[]): any[] {
     return (overlays || []).filter(
-      (o) => o.isActive && o.type !== 'LOGO' && o.type !== 'WATERMARK'
+      (o) => o.isActive && (o.isGraphicsOverlay || (o.type !== 'LOGO' && o.type !== 'WATERMARK'))
     );
   }
 

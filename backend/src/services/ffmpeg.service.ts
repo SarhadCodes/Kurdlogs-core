@@ -12,6 +12,7 @@ import { transcodingService } from './transcoding.service';
 import { monitorService } from './monitor.service';
 import { playlistService } from './playlist.service';
 import { gpuEncoderService } from './gpuEncoder.service';
+import { graphicsBurnInService } from './graphics/graphicsBurnIn.service';
 
 const FREEZE_TIMEOUT_MS = 30_000;
 const RTMP_FREEZE_TIMEOUT_MS = 120_000;
@@ -564,6 +565,14 @@ class FfmpegService {
         info.markedOnline = true;
         this.reconnectAttempts.set(channel.id, 0);
         prisma.channel.update({ where: { id: channel.id }, data: { status: 'ONLINE' } }).catch(() => {});
+        prisma.channelGraphics.updateMany({
+          where: {
+            channelId: channel.id,
+            enabled: true,
+            mode: { in: ['BURN_IN', 'HYBRID'] },
+          },
+          data: { rendererState: 'RUNNING', lastError: null },
+        }).catch(() => {});
         wsService.emitChannelStatus(channel.id, 'ONLINE');
         monitorService.addLog(channel.id, 'INFO', 'Stream is online.');
         return;
@@ -775,7 +784,8 @@ class FfmpegService {
       '-i', concatPath
     );
 
-    const playlistOverlays = overlayService.getPlaylistStreamOverlays(channel.overlays || []);
+    const runtimeOverlays = await this.getRuntimeOverlays(channel);
+    const playlistOverlays = overlayService.getPlaylistStreamOverlays(runtimeOverlays);
     const overlayInputs = await overlayService.getOverlayInputs(playlistOverlays);
     args.push(...overlayInputs);
 
@@ -1354,7 +1364,7 @@ class FfmpegService {
    * Falls back to adaptive transcode only when overlays are configured.
    */
   private async startMcrBusStream(channel: any): Promise<void> {
-    const hasOverlays = (channel.overlays || []).length > 0;
+    const hasOverlays = (await this.getRuntimeOverlays(channel)).length > 0;
     if (hasOverlays) {
       logger.info(
         `[MCR_OUTPUT_SOURCE] channelId=${channel.id} encoderMode=transcode-overlays — overlays require re-encode`
@@ -1462,6 +1472,12 @@ class FfmpegService {
     fs.writeFileSync(masterPath, body, 'utf8');
   }
 
+  /** Merge conventional channel overlays with the published static graphics scene. */
+  private async getRuntimeOverlays(channel: any): Promise<any[]> {
+    const graphicsOverlay = await graphicsBurnInService.getActiveOverlay(channel.id);
+    return graphicsOverlay ? [...(channel.overlays || []), graphicsOverlay] : channel.overlays || [];
+  }
+
   private async startDirectStream(channel: any, options?: { skipFpsCap?: boolean }): Promise<void> {
     const hasAudio = await this.probeLiveSourceHasAudio(channel);
     const encoder = gpuEncoderService.resolveForChannel(channel);
@@ -1469,14 +1485,15 @@ class FfmpegService {
 
     gpuEncoderService.prependDeviceArgs(args, encoder);
     args.push(...this.getInputCustomArgs(channel));
-    const overlayInputs = await overlayService.getOverlayInputs(channel.overlays || []);
+    const runtimeOverlays = await this.getRuntimeOverlays(channel);
+    const overlayInputs = await overlayService.getOverlayInputs(runtimeOverlays);
 
     this.appendLiveInputOptions(args, channel);
     args.push('-i', channel.sourceUrl);
     args.push(...overlayInputs);
 
-    const filterComplex = await overlayService.buildFilterComplex(channel.overlays || []);
-    if (this.hasMissingImageOverlay(channel, filterComplex)) return;
+    const filterComplex = await overlayService.buildFilterComplex(runtimeOverlays);
+    if (this.hasMissingImageOverlay({ ...channel, overlays: runtimeOverlays }, filterComplex)) return;
 
     const adaptiveMaps = this.prepareAdaptiveMaps(
       filterComplex,

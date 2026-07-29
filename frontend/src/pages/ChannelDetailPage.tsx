@@ -22,9 +22,9 @@ import {
   Key,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { channelApi, playlistApi, blueprintApi, monitorApi, tokenApi } from '../services/api';
+import { channelApi, playlistApi, blueprintApi, monitorApi, tokenApi, graphicsApi } from '../services/api';
 import { Playlist, ChannelBlueprint, Token } from '../types';
-import { Channel, StreamStats, StreamLog, ChannelHealthReport } from '../types';
+import { Channel, StreamStats, StreamLog, ChannelHealthReport, ChannelGraphics } from '../types';
 import { useChannelStore } from '../stores/channelStore';
 import Layout from '../components/Layout';
 import { buildStreamUrl, getPreviewManifestForEngine, getPlaylistVariantManifest } from '../utils/streamUrl';
@@ -36,6 +36,8 @@ import LivePlayer, {
 } from '../components/LivePlayer';
 import PreviewTestPanel from '../components/PreviewTestPanel';
 import HybridChannelPanel from '../components/HybridChannelPanel';
+import ChannelGraphicsPanel from '../components/ChannelGraphicsPanel';
+import PlayerGraphicsOverlay from '../components/PlayerGraphicsOverlay';
 import ChannelOutputPanel from '../components/ChannelOutputPanel';
 import ViewerMapFullscreen from '../components/ViewerMapFullscreen';
 import type { ViewerLocation, ViewerMapPayload } from '../types/viewer';
@@ -72,7 +74,7 @@ const ChannelDetailPage: React.FC = () => {
 
   const tabParam = searchParams.get('tab');
   const activeTab =
-    tabParam === 'outputs' || tabParam === 'settings' || tabParam === 'logs' || tabParam === 'preview'
+    tabParam === 'outputs' || tabParam === 'settings' || tabParam === 'logs' || tabParam === 'preview' || tabParam === 'graphics'
       ? tabParam
       : 'preview';
 
@@ -94,6 +96,7 @@ const ChannelDetailPage: React.FC = () => {
   const [viewerMapOpen, setViewerMapOpen] = useState(false);
   const [activeToken, setActiveToken] = useState<Token | null>(null);
   const [playUrls, setPlayUrls] = useState<ChannelPlayUrlsData | null>(null);
+  const [graphics, setGraphics] = useState<ChannelGraphics | null>(null);
 
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -182,12 +185,23 @@ const ChannelDetailPage: React.FC = () => {
     }
   }, [id]);
 
+  const fetchGraphics = useCallback(async () => {
+    if (!id) return;
+    try {
+      const result = await graphicsApi.get(id);
+      setGraphics(result.data || null);
+    } catch {
+      setGraphics(null);
+    }
+  }, [id]);
+
   useEffect(() => {
     fetchChannel();
     fetchStats();
     fetchLogs();
     fetchLivePlayback();
     fetchOutputs();
+    fetchGraphics();
     blueprintApi.getAll().then((res) => {
       if (res.data) setBlueprints(res.data);
     }).catch(() => {});
@@ -199,7 +213,7 @@ const ChannelDetailPage: React.FC = () => {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [fetchChannel, fetchStats, fetchLogs, fetchLivePlayback, fetchOutputs]);
+  }, [fetchChannel, fetchStats, fetchLogs, fetchLivePlayback, fetchOutputs, fetchGraphics]);
 
   useEffect(() => {
     if (channel?.blueprintId) setSelectedBlueprintId(channel.blueprintId);
@@ -551,13 +565,15 @@ const ChannelDetailPage: React.FC = () => {
             else next.set('tab', value);
             setSearchParams(next, { replace: true });
             if (value === 'outputs') void fetchOutputs();
+            if (value === 'preview') void fetchGraphics();
           }}
           className="w-full"
         >
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 sm:w-auto sm:inline-flex">
+          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-5 sm:w-auto sm:inline-flex">
             <TabsTrigger value="preview">Preview</TabsTrigger>
             <TabsTrigger value="outputs">Output links</TabsTrigger>
             <TabsTrigger value="settings">Settings</TabsTrigger>
+            <TabsTrigger value="graphics">Graphics</TabsTrigger>
             <TabsTrigger value="logs">Logs</TabsTrigger>
           </TabsList>
 
@@ -598,6 +614,7 @@ const ChannelDetailPage: React.FC = () => {
                     onQualityChange={setPreviewQuality}
                     onLevelsChange={setHlsLevels}
                     onCanManualQuality={setCanManualQuality}
+                    graphicsOverlay={<PlayerGraphicsOverlay graphics={graphics} />}
                   />
                 ) : (
                   <div className="flex h-full w-full flex-col items-center justify-center text-muted-foreground">
@@ -662,6 +679,10 @@ const ChannelDetailPage: React.FC = () => {
 
               <ChannelOutputPanel channel={channel} activeToken={activeToken} playUrls={playUrls} />
             </div>
+          </TabsContent>
+
+          <TabsContent value="graphics" className="mt-4">
+            <ChannelGraphicsPanel channelId={channel.id} />
           </TabsContent>
 
           <TabsContent value="logs" className="mt-4">

@@ -49,8 +49,8 @@ export const env = {
   FFMPEG_ENCODER_MODE: (process.env.FFMPEG_ENCODER_MODE || 'auto').toLowerCase(),
   NVENC_PRESET: process.env.NVENC_PRESET || 'p4',
   VAAPI_DEVICE: process.env.VAAPI_DEVICE || '/dev/dri/renderD128',
-  /** Max playlist video upload size in MB (default 512MB). */
-  MAX_UPLOAD_MB: parseInt(process.env.MAX_UPLOAD_MB || '512', 10),
+  /** Max playlist video upload size in MB (default 4GB, aligned with nginx). */
+  MAX_UPLOAD_MB: parseInt(process.env.MAX_UPLOAD_MB || '4096', 10),
   RTMP_PUBLISH_PORT: parseInt(process.env.RTMP_PUBLISH_PORT || '1936', 10),
   MCR_RTMP_PORT: parseInt(process.env.MCR_RTMP_PORT || process.env.RTMP_PUBLISH_PORT || '1936', 10),
   MCR_INGEST_SECRET: process.env.MCR_INGEST_SECRET || 'kurdlogs-mcr-ingest-secret',
@@ -59,4 +59,6 @@ export const env = {
   MCR_FADE_DURATION_MS: parseInt(process.env.MCR_FADE_DURATION_MS || '500', 10),
   MCR_ARCHITECTURE: (process.env.MCR_ARCHITECTURE || 'v2-switcher').toLowerCase(),
   NORMALIZE_PRESET: process.env.NORMALIZE_PRESET || 'ultrafast',
+  GRAPHICS_ENGINE_ENABLED: process.env.GRAPHICS_ENGINE_ENABLED === 'true',
+  GRAPHICS_MAX_ASSET_MB: parseInt(process.env.GRAPHICS_MAX_ASSET_MB || '10', 10),
 };

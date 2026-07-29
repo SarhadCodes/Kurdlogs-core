@@ -16,6 +16,7 @@ import blueprintRoutes from './blueprint.routes';
 import mcrRoutes from './mcr.routes';
 import mcrIngestRoutes from './mcrIngest.routes';
 import hybridRoutes from './hybrid.routes';
+import graphicsRoutes from './graphics.routes';
 
 const router = Router();
 
@@ -36,6 +37,7 @@ router.use('/blueprints', blueprintRoutes);
 router.use('/mcr/ingest', mcrIngestRoutes);
 router.use('/mcr', mcrRoutes);
 router.use('/hybrid', hybridRoutes);
+router.use('/v1/graphics', graphicsRoutes);
 
 export { streamRoutes };
 export default router;

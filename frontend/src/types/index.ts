@@ -111,6 +111,27 @@ export interface Overlay {
   position: string;
 }
 
+export type GraphicsMode = 'PLAYER' | 'BURN_IN' | 'HYBRID';
+
+export interface GraphicsAsset {
+  id: string;
+  filename: string;
+  mimeType: string;
+  path: string;
+  bytes: number;
+  createdAt: string;
+}
+
+export interface ChannelGraphics {
+  channelId: string;
+  mode: GraphicsMode;
+  enabled: boolean;
+  sceneVersion: number;
+  rendererState: string;
+  lastError?: string | null;
+  scene?: { id: string; document: { canvas: { width: number; height: number; frameRate: number }; nodes: Array<Record<string, unknown>> }; asset?: GraphicsAsset | null } | null;
+}
+
 export interface StreamStats {
   cpu: number;
   ram: number;

@@ -28,6 +28,64 @@ function LoginDotGrid() {
   );
 }
 
+function BroadcastPattern({ compact = false }: { compact?: boolean }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className="pointer-events-none absolute inset-0 h-full w-full overflow-visible"
+      viewBox="0 0 1000 760"
+      fill="none"
+      preserveAspectRatio="xMidYMid slice"
+    >
+      <defs>
+        <radialGradient id="broadcastGlow" cx="0" cy="0" r="1" gradientTransform="translate(500 365) rotate(90) scale(330)">
+          <stop stopColor="#34d399" stopOpacity=".14" />
+          <stop offset=".55" stopColor="#22d3ee" stopOpacity=".045" />
+          <stop offset="1" stopColor="#071719" stopOpacity="0" />
+        </radialGradient>
+        <linearGradient id="signalLine" x1="0" y1="0" x2="1" y2="0">
+          <stop stopColor="#5eead4" stopOpacity="0" />
+          <stop offset=".5" stopColor="#5eead4" stopOpacity=".35" />
+          <stop offset="1" stopColor="#5eead4" stopOpacity="0" />
+        </linearGradient>
+        <pattern id="broadcastGrid" width="48" height="48" patternUnits="userSpaceOnUse">
+          <path d="M48 0H0V48" stroke="#99f6e4" strokeOpacity=".045" />
+        </pattern>
+      </defs>
+
+      <rect width="1000" height="760" fill="url(#broadcastGrid)" />
+      <rect width="1000" height="760" fill="url(#broadcastGlow)" />
+
+      <g className="origin-center animate-[pulse_5s_ease-in-out_infinite]" transform="translate(500 370)">
+        <circle r={compact ? 82 : 115} stroke="#5eead4" strokeOpacity=".24" strokeWidth="1.5" />
+        <circle r={compact ? 142 : 190} stroke="#5eead4" strokeOpacity=".14" strokeWidth="1" strokeDasharray="4 10" />
+        <circle r={compact ? 215 : 285} stroke="#67e8f9" strokeOpacity=".1" strokeWidth="1" />
+        <circle r={compact ? 278 : 365} stroke="#5eead4" strokeOpacity=".07" strokeWidth="1" strokeDasharray="2 14" />
+      </g>
+
+      <g stroke="url(#signalLine)" strokeWidth="1">
+        <path d="M0 180C180 180 280 300 500 370S820 560 1000 560" />
+        <path d="M0 560C180 560 285 430 500 370S820 180 1000 180" />
+        <path d="M110 0C220 170 330 255 500 370S780 590 890 760" />
+        <path d="M890 0C780 170 670 255 500 370S220 590 110 760" />
+      </g>
+
+      <g fill="#99f6e4">
+        <circle cx="500" cy="370" r="5" fillOpacity=".9" className="animate-pulse" />
+        <circle cx="240" cy="280" r="3" fillOpacity=".5" />
+        <circle cx="760" cy="460" r="3" fillOpacity=".5" />
+        <circle cx="330" cy="555" r="2" fillOpacity=".45" />
+        <circle cx="670" cy="190" r="2" fillOpacity=".45" />
+      </g>
+
+      <g fill="#ccfbf1" fillOpacity=".55" fontSize="11" fontFamily="ui-monospace, SFMono-Regular, monospace" letterSpacing="2">
+        <text x="80" y="100">UPLINK_01</text>
+        <text x="755" y="655">LIVE_SIGNAL</text>
+      </g>
+    </svg>
+  );
+}
+
 function errorMessage(err: unknown): string {
   if (typeof err === 'string') {
     return err.includes('timeout')
@@ -126,6 +184,7 @@ const LoginPage: React.FC = () => {
         <div className="absolute inset-0">
           <LoginDotGrid />
         </div>
+        <BroadcastPattern />
         <div
           aria-hidden
           className="pointer-events-none absolute inset-0 bg-gradient-to-r from-transparent via-background/10 to-background"
@@ -141,6 +200,7 @@ const LoginPage: React.FC = () => {
         <div className="absolute inset-0">
           <LoginDotGrid />
         </div>
+        <BroadcastPattern compact />
         <div aria-hidden className="pointer-events-none absolute inset-0 bg-gradient-to-b from-background/10 to-background" />
         <LoginQuoteOverlay compact className="px-5 py-4" />
       </div>
