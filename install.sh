@@ -20,7 +20,7 @@ PROMPT="${ESC}[38;2;167;139;250m"
 
 DIST_BASE="${KURDLOGS_DIST_BASE:-https://kurdlogs-core.sarhadyt.workers.dev}"
 INSTALL_DIR="${KURDLOGS_INSTALL_DIR:-/opt/kurdlogs-core}"
-IMAGE_TAG="${KURDLOGS_IMAGE_TAG:-1.2.5}"
+IMAGE_TAG="${KURDLOGS_IMAGE_TAG:-1.2.6}"
 
 banner() {
   clear 2>/dev/null || true

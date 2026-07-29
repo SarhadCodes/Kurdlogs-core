@@ -7,7 +7,13 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 
 const CANVAS = { width: 1280, height: 720, frameRate: 24 };
-const commandId = () => crypto.randomUUID();
+// `crypto.randomUUID` is unavailable in some HTTP/browser combinations.
+// Command IDs only need to be unique per operator action, so use a safe
+// client-side fallback for non-secure deployments.
+const commandId = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+  return `graphics-${Date.now()}-${Math.random().toString(16).slice(2)}-${Math.random().toString(16).slice(2)}`;
+};
 
 type LogoLayout = { x: number; y: number; width: number; height: number; opacity: number };
 const DEFAULT_LAYOUT: LogoLayout = { x: 1056, y: 24, width: 200, height: 100, opacity: 0.9 };
