@@ -178,8 +178,10 @@ export const overlayApi = {
 export const graphicsApi = {
   get: (channelId: string) => api.get<any, ApiResponse<import('../types').ChannelGraphics | null>>(`/v1/graphics/channels/${channelId}`),
   save: (channelId: string, data: Record<string, unknown>) => api.put<any, ApiResponse<import('../types').ChannelGraphics>>(`/v1/graphics/channels/${channelId}`, data),
-  publish: (channelId: string, commandId: string) => api.post<any, ApiResponse>(`/v1/graphics/channels/${channelId}/publish`, { commandId }),
-  setVisibility: (channelId: string, visible: boolean, commandId: string) => api.post<any, ApiResponse>(`/v1/graphics/channels/${channelId}/visibility`, { visible, commandId }),
+  // Burned-in graphics restart the channel. A source reconnect can exceed the
+  // default 30-second request timeout, so wait for the renderer to finish.
+  publish: (channelId: string, commandId: string) => api.post<any, ApiResponse>(`/v1/graphics/channels/${channelId}/publish`, { commandId }, { timeout: 0 }),
+  setVisibility: (channelId: string, visible: boolean, commandId: string) => api.post<any, ApiResponse>(`/v1/graphics/channels/${channelId}/visibility`, { visible, commandId }, { timeout: 0 }),
   getAssets: () => api.get<any, ApiResponse<import('../types').GraphicsAsset[]>>('/v1/graphics/assets'),
   uploadAsset: (data: FormData) => api.post<any, ApiResponse<import('../types').GraphicsAsset>>('/v1/graphics/assets', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
 };
