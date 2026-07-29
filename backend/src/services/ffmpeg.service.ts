@@ -1114,10 +1114,12 @@ class FfmpegService {
       : '';
     const base = filterComplex ? '[outv]' : normalizeBeforeOverlays ? '[graphicsCanvas]' : '[0:v]';
     const prefix = [normalize, filterComplex].filter(Boolean).join(';');
+    const outputFilter = normalizeBeforeOverlays
+      ? `${base}format=${pixelFormat},fps=24[vout]`
+      : `${base}scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=${pixelFormat},fps=24[vout]`;
     return {
-      filterComplex:
-        `${prefix ? `${prefix};` : ''}${normalizeBeforeOverlays ? base : `${base}scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`},` +
-        `format=${pixelFormat},fps=24[vout]`,
+      filterComplex: `${prefix ? `${prefix};` : ''}${outputFilter}`,
       videoOut: '[vout]',
     };
   }
