@@ -230,6 +230,13 @@ export function stripHybridEndList(outDir: string, variant: string): void {
 export function sanitizeLiveHlsPlaylist(content: string): string {
   const lines = content.replace(/#EXT-X-ENDLIST\s*/g, '').trimEnd().split('\n');
 
+  // A master manifest only selects renditions. Media-playlist tags such as
+  // PLAYLIST-TYPE and START do not belong there, and native/browser HLS
+  // clients can reject the otherwise valid master manifest when they appear.
+  if (lines.some((l) => l.startsWith('#EXT-X-STREAM-INF'))) {
+    return `${lines.join('\n').trimEnd()}\n`;
+  }
+
   if (!lines.some((l) => l.startsWith('#EXT-X-PLAYLIST-TYPE'))) {
     const versionIdx = lines.findIndex((l) => l.startsWith('#EXT-X-VERSION'));
     if (versionIdx >= 0) {
