@@ -820,10 +820,17 @@ class FfmpegService {
       logger.info(`[PLAYLIST_AUDIO] channel=${channel.slug} source=concat_audio map=${audioMap}`);
     }
 
-    const filterComplex = await overlayService.buildFilterComplex(playlistOverlays);
+    // Graphics positions are authored on a 1280x720 canvas. Normalize the
+    // program before applying that scene so a 4:3/cinematic source cannot
+    // shift or stretch the placement seen in the graphics editor.
+    const graphicsCanvas = playlistOverlays.some((overlay: any) => overlay.isGraphicsOverlay);
+    const filterComplex = await overlayService.buildFilterComplex(
+      playlistOverlays,
+      graphicsCanvas ? '[graphicsCanvas]' : '[0:v]'
+    );
     if (this.hasMissingImageOverlay({ ...channel, overlays: playlistOverlays }, filterComplex)) return;
 
-    const playlistMaps = this.preparePlaylistVideoMap(filterComplex, channel, encoder.pixelFormat);
+    const playlistMaps = this.preparePlaylistVideoMap(filterComplex, channel, encoder.pixelFormat, graphicsCanvas);
     args.push('-filter_complex', playlistMaps.filterComplex);
 
     this.appendPlaylistStreamOutputs(
@@ -1098,15 +1105,19 @@ class FfmpegService {
   private preparePlaylistVideoMap(
     filterComplex: string | null,
     channel: any,
-    pixelFormat: 'yuv420p' | 'nv12' = 'yuv420p'
+    pixelFormat: 'yuv420p' | 'nv12' = 'yuv420p',
+    normalizeBeforeOverlays = false
   ): { filterComplex: string; videoOut: string } {
     const { width, height } = this.getPlaylistOutputDimensions(channel);
-    const base = filterComplex ? '[outv]' : '[0:v]';
-    const prefix = filterComplex ? `${filterComplex};` : '';
+    const normalize = normalizeBeforeOverlays
+      ? `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)[graphicsCanvas]`
+      : '';
+    const base = filterComplex ? '[outv]' : normalizeBeforeOverlays ? '[graphicsCanvas]' : '[0:v]';
+    const prefix = [normalize, filterComplex].filter(Boolean).join(';');
     return {
       filterComplex:
-        `${prefix}${base}scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=${pixelFormat},fps=24[vout]`,
+        `${prefix ? `${prefix};` : ''}${normalizeBeforeOverlays ? base : `${base}scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2`},` +
+        `format=${pixelFormat},fps=24[vout]`,
       videoOut: '[vout]',
     };
   }
@@ -1220,7 +1231,7 @@ class FfmpegService {
     filterComplex: string | null,
     pixelFormat: 'yuv420p' | 'nv12' = 'yuv420p',
     hasAudio = true,
-    options?: { skipFpsCap?: boolean }
+    options?: { skipFpsCap?: boolean; normalizeBeforeOverlays?: boolean }
   ): {
     filterComplex: string;
     video720: string;
@@ -1228,11 +1239,14 @@ class FfmpegService {
     audio720?: string;
     audio480?: string;
   } {
-    const base = filterComplex ? '[outv]' : '[0:v]';
-    const prefix = filterComplex ? `${filterComplex};` : '';
+    const normalize = options?.normalizeBeforeOverlays
+      ? '[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)[graphicsCanvas]'
+      : '';
+    const base = filterComplex ? '[outv]' : options?.normalizeBeforeOverlays ? '[graphicsCanvas]' : '[0:v]';
+    const prefix = [normalize, filterComplex].filter(Boolean).join(';');
     const fpsFilter = options?.skipFpsCap ? '' : 'fps=24,';
     let graph =
-      `${prefix}${base}format=${pixelFormat},${fpsFilter}split=2[v720src][v480src];` +
+      `${prefix ? `${prefix};` : ''}${base}format=${pixelFormat},${fpsFilter}split=2[v720src][v480src];` +
       `[v720src]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2[v720];` +
       `[v480src]scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2[v480]`;
 
@@ -1492,14 +1506,18 @@ class FfmpegService {
     args.push('-i', channel.sourceUrl);
     args.push(...overlayInputs);
 
-    const filterComplex = await overlayService.buildFilterComplex(runtimeOverlays);
+    const graphicsCanvas = runtimeOverlays.some((overlay: any) => overlay.isGraphicsOverlay);
+    const filterComplex = await overlayService.buildFilterComplex(
+      runtimeOverlays,
+      graphicsCanvas ? '[graphicsCanvas]' : '[0:v]'
+    );
     if (this.hasMissingImageOverlay({ ...channel, overlays: runtimeOverlays }, filterComplex)) return;
 
     const adaptiveMaps = this.prepareAdaptiveMaps(
       filterComplex,
       encoder.pixelFormat,
       hasAudio,
-      { skipFpsCap: options?.skipFpsCap }
+      { skipFpsCap: options?.skipFpsCap, normalizeBeforeOverlays: graphicsCanvas }
     );
     args.push('-filter_complex', adaptiveMaps.filterComplex);
 

@@ -187,12 +187,17 @@ class OverlayService {
     return path.join(env.UPLOADS_DIR, normalized);
   }
 
-  async buildFilterComplex(overlays: any[]): Promise<string | null> {
+  /**
+   * Build the overlay chain on a caller-provided video label. Graphics scenes
+   * use a normalized 1280x720 canvas, so their editor coordinates are the
+   * same coordinates FFmpeg receives after letterboxing source material.
+   */
+  async buildFilterComplex(overlays: any[], initialVideoLabel = '[0:v]'): Promise<string | null> {
     const activeOverlays = this.getActiveOverlays(overlays);
     if (activeOverlays.length === 0) return null;
 
     const parts: string[] = [];
-    let currentInput = '[0:v]';
+    let currentInput = initialVideoLabel;
     let imageInputIndex = 1;
 
     for (let i = 0; i < activeOverlays.length; i++) {
