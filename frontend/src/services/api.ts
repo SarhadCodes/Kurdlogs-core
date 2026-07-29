@@ -37,7 +37,10 @@ api.interceptors.response.use(
     if (code) {
       return Promise.reject({ message: detail, code, status: error.response?.status });
     }
-    return Promise.reject(detail);
+    // Keep the Axios response available to feature-level callers. Converting it
+    // to a bare string hid useful graphics renderer errors behind a generic toast.
+    error.message = detail;
+    return Promise.reject(error);
   }
 );
 

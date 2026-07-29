@@ -85,7 +85,9 @@ export default function ChannelGraphicsPanel({ channelId }: { channelId: string 
       await graphicsApi.publish(channelId, commandId());
       await load();
       toast.success(mode === 'PLAYER' ? 'Graphics saved and applied' : 'Graphics saved and applied — channel restarted');
-    } catch (error: any) { toast.error(error?.response?.data?.error || 'Failed to apply graphics'); }
+    } catch (error: any) {
+      toast.error(error?.response?.data?.error || error?.message || 'Failed to apply graphics');
+    }
     finally { setBusy(false); }
   };
 
