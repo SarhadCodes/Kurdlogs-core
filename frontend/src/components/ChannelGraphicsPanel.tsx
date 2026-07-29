@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Eye, EyeOff, ImagePlus, Maximize2, Move, Radio, RotateCcw, Save, Send } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { graphicsApi } from '../services/api';
@@ -33,6 +33,8 @@ export default function ChannelGraphicsPanel({ channelId }: { channelId: string 
   const [mode, setMode] = useState<GraphicsMode>('PLAYER');
   const [layout, setLayout] = useState<LogoLayout>(DEFAULT_LAYOUT);
   const [busy, setBusy] = useState(false);
+  const previewRef = useRef<HTMLDivElement>(null);
+  const dragOffsetRef = useRef<{ x: number; y: number } | null>(null);
 
   const selectedAsset = useMemo(() => assets.find((asset) => asset.id === assetId) || null, [assets, assetId]);
   const updateLayout = (key: keyof LogoLayout, raw: number) => {
@@ -44,6 +46,35 @@ export default function ChannelGraphicsPanel({ channelId }: { channelId: string 
       if (key === 'x') return { ...current, x: Math.min(CANVAS.width - current.width, Math.max(0, value)) };
       return { ...current, y: Math.min(CANVAS.height - current.height, Math.max(0, value)) };
     });
+  };
+
+  const beginLogoDrag = (event: React.PointerEvent<HTMLImageElement>) => {
+    const frame = previewRef.current?.getBoundingClientRect();
+    if (!frame) return;
+    dragOffsetRef.current = {
+      x: ((event.clientX - frame.left) / frame.width) * CANVAS.width - layout.x,
+      y: ((event.clientY - frame.top) / frame.height) * CANVAS.height - layout.y,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+    event.preventDefault();
+  };
+
+  const moveLogo = (event: React.PointerEvent<HTMLImageElement>) => {
+    const frame = previewRef.current?.getBoundingClientRect();
+    const offset = dragOffsetRef.current;
+    if (!frame || !offset) return;
+    const x = ((event.clientX - frame.left) / frame.width) * CANVAS.width - offset.x;
+    const y = ((event.clientY - frame.top) / frame.height) * CANVAS.height - offset.y;
+    setLayout((current) => ({
+      ...current,
+      x: Math.min(CANVAS.width - current.width, Math.max(0, x)),
+      y: Math.min(CANVAS.height - current.height, Math.max(0, y)),
+    }));
+  };
+
+  const endLogoDrag = (event: React.PointerEvent<HTMLImageElement>) => {
+    dragOffsetRef.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
 
   const load = async () => {
@@ -137,17 +168,17 @@ export default function ChannelGraphicsPanel({ channelId }: { channelId: string 
     <div className="grid gap-5 lg:grid-cols-[minmax(0,1.25fr)_minmax(300px,0.75fr)]">
       <section>
           <div className="mb-2 flex items-center justify-between"><div className="flex items-center gap-2 text-sm font-medium"><Maximize2 className="h-4 w-4 text-muted-foreground" /> 1280 × 720 preview</div><span className="text-xs text-muted-foreground">Use Save & apply to make changes live</span></div>
-        <div className="relative aspect-video overflow-hidden rounded-lg border border-border bg-[radial-gradient(circle_at_18%_20%,rgba(16,185,129,.18),transparent_30%),linear-gradient(135deg,#0d1726,#05080d_60%,#111827)] shadow-inner">
+        <div ref={previewRef} className="relative aspect-video overflow-hidden rounded-lg border border-border bg-[radial-gradient(circle_at_18%_20%,rgba(16,185,129,.18),transparent_30%),linear-gradient(135deg,#0d1726,#05080d_60%,#111827)] shadow-inner">
           <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(255,255,255,.08)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.08)_1px,transparent_1px)] [background-size:12.5%_16.666%]" />
           <div className="absolute left-4 top-3 rounded bg-red-500 px-2 py-1 text-[10px] font-bold tracking-wide text-white">LIVE PREVIEW</div>
           <div className="absolute inset-x-0 bottom-0 h-14 bg-gradient-to-t from-black/65 to-transparent" />
-          {previewUrl ? <img src={previewUrl} alt="Logo placement preview" className="absolute object-contain" style={{ left: `${(layout.x / CANVAS.width) * 100}%`, top: `${(layout.y / CANVAS.height) * 100}%`, width: `${(layout.width / CANVAS.width) * 100}%`, height: `${(layout.height / CANVAS.height) * 100}%`, opacity: layout.opacity }} /> : <div className="absolute inset-0 grid place-items-center text-center text-sm text-muted-foreground">Select or upload a logo to preview it</div>}
+          {previewUrl ? <img src={previewUrl} alt="Drag logo to position it" title="Drag to position the logo" onPointerDown={beginLogoDrag} onPointerMove={moveLogo} onPointerUp={endLogoDrag} onPointerCancel={endLogoDrag} className="absolute touch-none select-none object-contain cursor-grab active:cursor-grabbing" draggable={false} style={{ left: `${(layout.x / CANVAS.width) * 100}%`, top: `${(layout.y / CANVAS.height) * 100}%`, width: `${(layout.width / CANVAS.width) * 100}%`, height: `${(layout.height / CANVAS.height) * 100}%`, opacity: layout.opacity }} /> : <div className="absolute inset-0 grid place-items-center text-center text-sm text-muted-foreground">Select or upload a logo to preview it</div>}
           <div className="absolute bottom-3 left-4 text-xs font-medium text-white/80">Channel program</div>
         </div>
       </section>
 
       <section className="space-y-4 rounded-lg border border-border bg-background/40 p-4">
-        <div className="flex items-center gap-2 text-sm font-medium"><Move className="h-4 w-4 text-muted-foreground" /> Placement & size</div>
+        <div className="flex items-center gap-2 text-sm font-medium"><Move className="h-4 w-4 text-muted-foreground" /> Placement & size</div><p className="-mt-2 text-xs text-muted-foreground">Drag the logo in the preview for free placement.</p>
         <div className="grid grid-cols-2 gap-3">
           <label className="text-xs text-muted-foreground">X position<Input className={fieldClass} type="number" min="0" max={CANVAS.width - layout.width} value={layout.x} onChange={(e) => updateLayout('x', Number(e.target.value))} /></label>
           <label className="text-xs text-muted-foreground">Y position<Input className={fieldClass} type="number" min="0" max={CANVAS.height - layout.height} value={layout.y} onChange={(e) => updateLayout('y', Number(e.target.value))} /></label>
