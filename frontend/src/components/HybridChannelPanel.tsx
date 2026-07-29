@@ -207,6 +207,9 @@ export default function HybridChannelPanel({ channelId, channelSlug, isOnline }:
           <p className="text-xs text-gray-500 mt-0.5">
             Viewer URL stays <span className="font-mono text-gray-400">/stream/{channelSlug}/master.m3u8</span>
           </p>
+          <p className="mt-1 text-xs text-emerald-300/80">
+            The next source is buffered before it is taken on air; viewers keep the same stream URL.
+          </p>
         </div>
         <span
           className={`text-xs font-medium px-2.5 py-1 rounded-full border ${
@@ -354,6 +357,10 @@ export default function HybridChannelPanel({ channelId, channelSlug, isOnline }:
           {action === 'return' ? 'Returning…' : 'Return To Schedule'}
         </button>
       </div>
+
+      <p className="rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-xs text-gray-400">
+        For the smoothest switch, keep <strong className="font-medium text-gray-200">Live feed normalization</strong> on AUTO or ON. A Station ID is optional; when selected, it is used as a deliberate broadcast bumper instead of a blank transition.
+      </p>
 
       {!isOnline && (
         <p className="text-xs text-amber-500/90">Start the channel before switching sources.</p>

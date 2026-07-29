@@ -74,9 +74,14 @@ interface HybridProcessEntry {
   kind: HybridDecoderKind;
 }
 
-const PREWARM_MIN_SEGMENTS = 1;
-const PREWARM_WAIT_MS = 8_000;
-const HANDOFF_KEEP_SEGMENTS = 8;
+// Keep enough already-playable material in front of a handoff for ordinary
+// HLS clients (VLC, TVs, browsers) to keep decoding while the next encoder is
+// made authoritative. Live segments are one second; blueprint segments are
+// six seconds, so their warm-up targets intentionally differ.
+const LIVE_PREWARM_MIN_SEGMENTS = 3;
+const BLUEPRINT_PREWARM_MIN_SEGMENTS = 2;
+const PREWARM_WAIT_MS = 15_000;
+const HANDOFF_KEEP_SEGMENTS = 12;
 
 class HybridOutputService {
   private processes = new Map<string, HybridProcessEntry>();
@@ -250,7 +255,7 @@ class HybridOutputService {
     );
 
     const prewarmDir = getHybridPrewarmDir(outDir, variant);
-    await waitForPrewarmSegments(prewarmDir, PREWARM_MIN_SEGMENTS, PREWARM_WAIT_MS).catch(
+    await waitForPrewarmSegments(prewarmDir, LIVE_PREWARM_MIN_SEGMENTS, PREWARM_WAIT_MS).catch(
       async () => {
         await prewarmPromise.catch(() => undefined);
         logger.warn(`[HYBRID] live prewarm thin channel=${channel.slug} — switching with buffer`);
@@ -316,7 +321,7 @@ class HybridOutputService {
     const prewarmPromise = ffmpegService.startBlueprintPrewarm(full);
     const prewarmDir = getHybridPrewarmDir(outDir, variant);
 
-    await waitForPrewarmSegments(prewarmDir, PREWARM_MIN_SEGMENTS, PREWARM_WAIT_MS).catch(
+    await waitForPrewarmSegments(prewarmDir, BLUEPRINT_PREWARM_MIN_SEGMENTS, PREWARM_WAIT_MS).catch(
       async () => {
         await prewarmPromise.catch(() => undefined);
         logger.warn(`[HYBRID] blueprint prewarm thin channel=${channel.slug} — switching with buffer`);
