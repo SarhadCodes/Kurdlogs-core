@@ -551,30 +551,24 @@ export function waitForPrewarmSegments(
 }
 
 /**
- * Splice pre-buffered live segments into the main playlist the moment station ID ends.
- * Keeps only recent station segments (not old blueprint) so players jump straight to live.
+ * Append pre-buffered segments to the active media playlist.
+ *
+ * HLS players track the manifest as a timeline.  Rebuilding that file during
+ * a source switch makes an already-playing client believe its current segment
+ * disappeared, which causes the browser/VLC loading state.  Keep every
+ * existing tag and segment (including the Station ID), then append a clean
+ * discontinuity and the ready-to-play destination segments.
  */
 export function mergePrewarmIntoMain(
   outDir: string,
   variant: string,
-  options?: { stationStartNumber?: number; keepStationSegments?: number }
 ): { nextStartNumber: number; mergedLiveCount: number } {
-  const keepStationSegments = options?.keepStationSegments ?? 0;
   const variantDir = path.join(outDir, variant);
   const prewarmDir = getHybridPrewarmDir(outDir, variant);
   const mainPlaylistPath = path.join(variantDir, 'index.m3u8');
   const prewarmPlaylistPath = path.join(prewarmDir, 'index.m3u8');
 
   ensureHybridOutputDirs(outDir, variant);
-
-  let stationSegments: ParsedHlsSegment[] = [];
-  if (fs.existsSync(mainPlaylistPath)) {
-    stationSegments = parseHlsSegments(fs.readFileSync(mainPlaylistPath, 'utf8'));
-    if (options?.stationStartNumber != null) {
-      stationSegments = stationSegments.filter((s) => s.number >= options.stationStartNumber!);
-    }
-    stationSegments = stationSegments.slice(-keepStationSegments);
-  }
 
   const prewarmSegments = fs.existsSync(prewarmPlaylistPath)
     ? parseHlsSegments(fs.readFileSync(prewarmPlaylistPath, 'utf8'))
@@ -593,31 +587,21 @@ export function mergePrewarmIntoMain(
     nextNumber++;
   }
 
-  const targetDur = Math.max(
-    HYBRID_LIVE_SEGMENT_SECONDS + 1,
-    HYBRID_STATION_SEGMENT_SECONDS + 1,
-    HYBRID_HLS_SEGMENT_SECONDS + 1
-  );
+  let mainContent = fs.existsSync(mainPlaylistPath)
+    ? fs.readFileSync(mainPlaylistPath, 'utf8')
+    : '#EXTM3U\n#EXT-X-VERSION:3\n';
+  mainContent = mainContent.replace(/#EXT-X-ENDLIST\s*/g, '').trimEnd();
+  if (!mainContent.endsWith('\n')) mainContent += '\n';
 
-  const rebuilt: string[] = [
-    '#EXTM3U',
-    '#EXT-X-VERSION:3',
-    '#EXT-X-PLAYLIST-TYPE:EVENT',
-    '#EXT-X-START:TIME-OFFSET=-3.0',
-    `#EXT-X-TARGETDURATION:${targetDur}`,
-  ];
-
-  for (const seg of stationSegments) {
-    rebuilt.push(seg.extinf, seg.uri);
-  }
   if (mergedLive.length > 0) {
-    rebuilt.push('#EXT-X-DISCONTINUITY');
+    // The decoder, codecs, timestamps, and source have changed.  This is the
+    // correct HLS signal for clients to continue without reloading the master.
+    mainContent += '#EXT-X-DISCONTINUITY\n';
     for (const seg of mergedLive) {
-      rebuilt.push(seg.extinf, seg.uri);
+      mainContent += `${seg.extinf}\n${seg.uri}\n`;
     }
   }
-  rebuilt.push('');
-  fs.writeFileSync(mainPlaylistPath, rebuilt.join('\n'), 'utf8');
+  fs.writeFileSync(mainPlaylistPath, mainContent, 'utf8');
 
   const prewarmRoot = path.join(outDir, '.hybrid-prewarm');
   if (fs.existsSync(prewarmRoot)) {

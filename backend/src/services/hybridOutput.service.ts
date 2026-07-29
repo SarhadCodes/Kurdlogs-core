@@ -42,7 +42,7 @@ export interface LiveFeedPlan {
 }
 
 interface StartLiveFeedOptions {
-  /** seamless = direct take; fresh = cold start (recovery); continue = prewarm merged */
+  /** seamless = append after station/blueprint; fresh = cold start (recovery); continue = prewarm merged */
   handoff?: 'seamless' | 'fresh' | 'continue';
   waitForReady?: boolean;
   prefetched?: LiveFeedPlan;
@@ -52,11 +52,15 @@ interface StartLiveFeedOptions {
 interface TransitionToLiveOptions {
   liveFeedUrl: string;
   normalization: HybridNormalizationMode;
+  stationPath?: string | null;
+  stationNormalization?: HybridNormalizationMode;
   prefetched?: LiveFeedPlan;
   onSpliced?: () => void;
 }
 
 interface TransitionToScheduleOptions {
+  stationPath?: string | null;
+  stationNormalization?: HybridNormalizationMode;
   onSpliced?: () => void;
 }
 
@@ -225,7 +229,7 @@ class HybridOutputService {
     return startNumber;
   }
 
-  /** TV-style direct take: pre-buffer live while Blueprint stays on air, then splice. */
+  /** TV-style transition: pre-buffer live while Blueprint stays on air, then play Station ID and splice. */
   async transitionToLive(
     channel: { id: string; name: string; slug: string; transcodingProfile?: { resolution?: string | null } | null },
     options: TransitionToLiveOptions
@@ -254,21 +258,35 @@ class HybridOutputService {
       }
     );
 
-    await ffmpegService.stopDecoderOnly(channel.id, { preserveBlueprintRuntime: true });
-    await this.stop(channel.id);
+    if (options.stationPath) {
+      await ffmpegService.stopDecoderOnly(channel.id, { preserveBlueprintRuntime: true });
+      await this.stop(channel.id);
+      try {
+        await this.playStationId(
+          channel,
+          options.stationPath,
+          options.stationNormalization ?? options.normalization
+        );
+        stripHybridEndList(outDir, variant);
+      } catch (stationErr) {
+        const msg = stationErr instanceof Error ? stationErr.message : String(stationErr);
+        logger.warn(`[HYBRID] station-id skipped channel=${channel.slug}: ${msg}`);
+        monitorService.addLog(channel.id, 'WARN', `Station ID skipped: ${msg}`);
+      }
+    } else {
+      await ffmpegService.stopDecoderOnly(channel.id, { preserveBlueprintRuntime: true });
+      await this.stop(channel.id);
+    }
 
     await prewarmPromise.catch((err) =>
       logger.warn(`[HYBRID] prewarm failed channel=${channel.slug}:`, err)
     );
     await this.stopLivePrewarm(channel.id);
 
-    // Do not retain old-source segments in the rewritten playlist.  They make
-    // an HLS client walk through the old program after an operator has taken
-    // the new feed, which appears as mixed feeds.  The prewarm is already
-    // playable, so the new source can be published immediately.
-    const { nextStartNumber, mergedLiveCount } = mergePrewarmIntoMain(outDir, variant, {
-      keepStationSegments: 0,
-    });
+    // Keep the existing manifest and append the prewarmed source after the
+    // Station ID. Rewriting an active media playlist makes HLS players lose
+    // their timeline and show a loading spinner.
+    const { nextStartNumber, mergedLiveCount } = mergePrewarmIntoMain(outDir, variant);
 
     await this.startLiveFeed(channel, url, options.normalization, {
       handoff: mergedLiveCount > 0 ? 'continue' : 'seamless',
@@ -306,16 +324,30 @@ class HybridOutputService {
       }
     );
 
-    await this.stop(channel.id);
+    if (options.stationPath) {
+      await this.stop(channel.id);
+      try {
+        await this.playStationId(
+          channel,
+          options.stationPath,
+          options.stationNormalization ?? 'AUTO'
+        );
+        stripHybridEndList(outDir, variant);
+      } catch (stationErr) {
+        const msg = stationErr instanceof Error ? stationErr.message : String(stationErr);
+        logger.warn(`[HYBRID] station-id skipped channel=${channel.slug}: ${msg}`);
+        monitorService.addLog(channel.id, 'WARN', `Station ID skipped: ${msg}`);
+      }
+    } else {
+      await this.stop(channel.id);
+    }
 
     await prewarmPromise.catch((err) =>
       logger.warn(`[HYBRID] blueprint prewarm failed channel=${channel.slug}:`, err)
     );
     await ffmpegService.stopBlueprintPrewarm(channel.id);
 
-    const { nextStartNumber, mergedLiveCount } = mergePrewarmIntoMain(outDir, variant, {
-      keepStationSegments: 0,
-    });
+    const { nextStartNumber, mergedLiveCount } = mergePrewarmIntoMain(outDir, variant);
 
     ffmpegService.clearReconnectState(channel.id);
     await ffmpegService.startStream(full, {

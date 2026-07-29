@@ -185,11 +185,11 @@ class HybridChannelService {
         state.liveNormalization
       );
 
-      // A source handoff must be a direct take.  A station ID belongs in a
-      // scheduled Blueprint block, not between the on-air sources: inserting
-      // one here adds a third decoder and makes the viewer playlist contain
-      // three different programs during a single take.
-      logger.info(`[HYBRID] go-live channel=${channel.slug} direct-take=yes`);
+      const freshState = await prisma.hybridChannelState.findUnique({ where: { channelId } });
+      const stationPath = freshState ? await this.resolveStationIdPath(freshState) : null;
+      logger.info(
+        `[HYBRID] go-live channel=${channel.slug} stationTransition=${stationPath ? 'yes' : 'no'}`
+      );
 
       let spliced = false;
       const markSpliced = async () => {
@@ -211,6 +211,8 @@ class HybridChannelService {
       await hybridOutputService.transitionToLive(channel, {
         liveFeedUrl: state.liveFeedUrl!,
         normalization: state.liveNormalization,
+        stationPath,
+        stationNormalization: freshState?.stationNormalization ?? state.stationNormalization,
         prefetched: await livePrep,
         onSpliced: () => {
           void markSpliced();
@@ -252,9 +254,11 @@ class HybridChannelService {
     state: { stationNormalization: HybridNormalizationMode }
   ): Promise<void> {
     try {
-      // Direct take back to Blueprint for the same reason as Go Live.  Keep
-      // configured Station ID assets available to Blueprint schedules only.
-      logger.info(`[HYBRID] return-to-schedule channel=${channel.slug} direct-take=yes`);
+      const freshState = await prisma.hybridChannelState.findUnique({ where: { channelId } });
+      const stationPath = freshState ? await this.resolveStationIdPath(freshState) : null;
+      logger.info(
+        `[HYBRID] return-to-schedule channel=${channel.slug} stationTransition=${stationPath ? 'yes' : 'no'}`
+      );
 
       let spliced = false;
       const markSpliced = async () => {
@@ -275,6 +279,8 @@ class HybridChannelService {
       };
 
       await hybridOutputService.transitionToSchedule(channel, {
+        stationPath,
+        stationNormalization: freshState?.stationNormalization ?? state.stationNormalization,
         onSpliced: () => {
           void markSpliced();
         },

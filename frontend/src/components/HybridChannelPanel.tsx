@@ -359,7 +359,7 @@ export default function HybridChannelPanel({ channelId, channelSlug, isOnline }:
       </div>
 
       <p className="rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-xs text-gray-400">
-        For the smoothest switch, keep <strong className="font-medium text-gray-200">Live feed normalization</strong> on AUTO or ON. Feed changes are direct takes: the next source is pre-buffered, then replaces the current source without inserting a Station ID video. Use Station ID assets inside a Blueprint schedule when you want a bumper on air.
+        For the smoothest switch, keep <strong className="font-medium text-gray-200">Live feed normalization</strong> on AUTO or ON. The next source is pre-buffered while the current program stays on air, then the Station ID plays and the new source is appended to the same viewer timeline.
       </p>
 
       {!isOnline && (
