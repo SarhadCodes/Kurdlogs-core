@@ -165,6 +165,7 @@ if (-not (Test-Path $envPath)) {
   $utf8NoBom = New-Object System.Text.UTF8Encoding $false
   $envBody = @"
 PUBLIC_BASE_URL=http://localhost:$HttpPort
+CORS_ORIGIN=http://localhost:$HttpPort,http://localhost
 JWT_SECRET=$jwt
 ADMIN_INITIAL_PASSWORD=$adminPasswordShown
 IPTV_API_KEY=$api
@@ -204,6 +205,7 @@ Set-KlEnvValue $envPath 'RTMP_PUBLISH_PORT' '1936'
 Set-KlEnvValue $envPath 'MCR_RTMP_PORT' '1936'
 Set-KlEnvValue $envPath 'HTTP_PORT' "$HttpPort"
 Set-KlEnvValue $envPath 'PUBLIC_BASE_URL' "http://localhost:$HttpPort"
+Set-KlEnvValue $envPath 'CORS_ORIGIN' "http://localhost:$HttpPort,http://localhost"
 Write-Ok 'RTMP ingest pinned to port 1936 (avoids Flussonic on 1935)'
 
 $rtmpPort = [int](Get-KlEnvValue $envPath 'RTMP_PUBLISH_PORT')

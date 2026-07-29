@@ -166,6 +166,7 @@ if [ ! -f .env ]; then
   ADMIN_PASSWORD_SHOWN='Kurdlogs!'
   cat > .env <<EOF
 PUBLIC_BASE_URL=http://${PUBLIC_IP}:${HTTP_PORT}
+CORS_ORIGIN=http://localhost:8081,http://localhost,http://${PUBLIC_IP}:${HTTP_PORT}
 JWT_SECRET=$(rand_hex 24)
 ADMIN_INITIAL_PASSWORD=${ADMIN_PASSWORD_SHOWN}
 IPTV_API_KEY=$(rand_hex 16)
@@ -210,6 +211,7 @@ set_env_value "RTMP_PUBLISH_PORT" "1936"
 set_env_value "MCR_RTMP_PORT" "1936"
 set_env_value "HTTP_PORT" "${HTTP_PORT}"
 set_env_value "PUBLIC_BASE_URL" "http://${PUBLIC_IP}:${HTTP_PORT}"
+set_env_value "CORS_ORIGIN" "http://localhost:8081,http://localhost,http://${PUBLIC_IP}:${HTTP_PORT}"
 info "RTMP ingest pinned to port 1936 (avoids Flussonic on 1935)"
 if port_in_use 1936; then
   fail "Port 1936 is already in use on this machine — nginx-rtmp may fail to start."
