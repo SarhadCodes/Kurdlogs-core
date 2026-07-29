@@ -88,6 +88,30 @@ port_in_use() {
   fi
 }
 
+wait_for_apt() {
+  local attempt=0
+  local locks=(/var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock)
+  while command -v fuser >/dev/null 2>&1 && fuser "${locks[@]}" >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt 30 ]; then
+      fail "Another package installation is still running. Finish it, then run this installer again."
+      exit 1
+    fi
+    info "Waiting for another package installation to finish (${attempt}/30)..."
+    sleep 2
+  done
+}
+
+ensure_apt_space() {
+  local available_kb
+  available_kb="$(df -Pk /var/lib/apt/lists 2>/dev/null | awk 'NR == 2 { print $4 }')"
+  if [ -z "$available_kb" ] || [ "$available_kb" -lt 524288 ]; then
+    fail "At least 512 MB of free Linux disk space is required for installation."
+    info "Free space in the Linux/WSL filesystem, then run this installer again."
+    exit 1
+  fi
+}
+
 banner
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
@@ -102,6 +126,10 @@ step "01" "Install runtime dependencies"
 cmd "apt-get install curl ca-certificates"
 export DEBIAN_FRONTEND=noninteractive
 if command -v apt-get >/dev/null 2>&1; then
+  wait_for_apt
+  # Safe to remove: APT will recreate downloaded package indexes on the next update.
+  apt-get clean -qq || true
+  ensure_apt_space
   apt-get update -qq
   apt-get install -y -qq curl ca-certificates
 fi
