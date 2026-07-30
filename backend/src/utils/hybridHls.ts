@@ -237,20 +237,12 @@ export function sanitizeLiveHlsPlaylist(content: string): string {
     return `${lines.join('\n').trimEnd()}\n`;
   }
 
-  if (!lines.some((l) => l.startsWith('#EXT-X-PLAYLIST-TYPE'))) {
-    const versionIdx = lines.findIndex((l) => l.startsWith('#EXT-X-VERSION'));
-    if (versionIdx >= 0) {
-      lines.splice(versionIdx + 1, 0, '#EXT-X-PLAYLIST-TYPE:EVENT');
-    }
-  }
-
-  if (!lines.some((l) => l.startsWith('#EXT-X-START:'))) {
-    const versionIdx = lines.findIndex((l) => l.startsWith('#EXT-X-VERSION'));
-    const insertAt = versionIdx >= 0 ? versionIdx + 2 : 2;
-    lines.splice(insertAt, 0, '#EXT-X-START:TIME-OFFSET=-3.0');
-  }
-
-  return `${lines.join('\n').trimEnd()}\n`;
+  // Live output must stay a sliding playlist. EVENT prevents pruning and will
+  // eventually leave a huge manifest that references deleted old segments.
+  const liveLines = lines.filter(
+    (line) => !line.startsWith('#EXT-X-PLAYLIST-TYPE:EVENT') && !line.startsWith('#EXT-X-START:')
+  );
+  return `${liveLines.join('\n').trimEnd()}\n`;
 }
 
 /** Low-latency demuxer options — place immediately before `-i` on live HLS inputs. */
@@ -272,12 +264,6 @@ export function appendHybridLiveInputOptions(args: string[]): void {
 function pushHlsStartNumber(args: string[], startNumber?: number): void {
   if (startNumber != null && startNumber > 0) {
     args.push('-start_number', String(startNumber));
-  }
-}
-
-function pushHybridEventPlaylistType(args: string[], profile: HybridHlsProfile): void {
-  if (profile === 'live' || profile === 'station') {
-    args.push('-hls_playlist_type', 'event');
   }
 }
 
@@ -333,8 +319,6 @@ export function appendHybridHlsOutput(
   }
 
   pushHlsStartNumber(args, startNumber);
-  pushHybridEventPlaylistType(args, profile);
-
   args.push(
     '-max_muxing_queue_size',
     '2048',
@@ -375,8 +359,6 @@ export function appendHybridStreamCopyHls(
   if (hasAudio) args.push('-c:a', 'copy');
 
   pushHlsStartNumber(args, startNumber);
-  pushHybridEventPlaylistType(args, profile);
-
   args.push(
     '-max_muxing_queue_size',
     '4096',
@@ -559,6 +541,8 @@ export function waitForPrewarmSegments(
  * existing tag and segment (including the Station ID), then append a clean
  * discontinuity and the ready-to-play destination segments.
  */
+const HYBRID_HANDOFF_WINDOW_SEGMENTS = 30;
+
 export function mergePrewarmIntoMain(
   outDir: string,
   variant: string,
@@ -587,21 +571,29 @@ export function mergePrewarmIntoMain(
     nextNumber++;
   }
 
-  let mainContent = fs.existsSync(mainPlaylistPath)
-    ? fs.readFileSync(mainPlaylistPath, 'utf8')
-    : '#EXTM3U\n#EXT-X-VERSION:3\n';
-  mainContent = mainContent.replace(/#EXT-X-ENDLIST\s*/g, '').trimEnd();
-  if (!mainContent.endsWith('\n')) mainContent += '\n';
-
-  if (mergedLive.length > 0) {
-    // The decoder, codecs, timestamps, and source have changed.  This is the
-    // correct HLS signal for clients to continue without reloading the master.
-    mainContent += '#EXT-X-DISCONTINUITY\n';
-    for (const seg of mergedLive) {
-      mainContent += `${seg.extinf}\n${seg.uri}\n`;
-    }
-  }
-  fs.writeFileSync(mainPlaylistPath, mainContent, 'utf8');
+  const existing = fs.existsSync(mainPlaylistPath)
+    ? parseHlsSegments(fs.readFileSync(mainPlaylistPath, 'utf8'))
+    : [];
+  // Retain a generous handoff window for active clients, but bound it so a
+  // channel can operate for months without an ever-growing manifest.
+  const retained = existing.slice(-HYBRID_HANDOFF_WINDOW_SEGMENTS);
+  const all = [...retained, ...mergedLive];
+  const targetDur = Math.max(
+    HYBRID_LIVE_SEGMENT_SECONDS + 1,
+    HYBRID_STATION_SEGMENT_SECONDS + 1,
+    HYBRID_HLS_SEGMENT_SECONDS + 1
+  );
+  const rebuilt = [
+    '#EXTM3U',
+    '#EXT-X-VERSION:3',
+    `#EXT-X-TARGETDURATION:${targetDur}`,
+    ...(all.length > 0 ? [`#EXT-X-MEDIA-SEQUENCE:${all[0].number}`] : []),
+  ];
+  for (const seg of retained) rebuilt.push(seg.extinf, seg.uri);
+  if (retained.length > 0 && mergedLive.length > 0) rebuilt.push('#EXT-X-DISCONTINUITY');
+  for (const seg of mergedLive) rebuilt.push(seg.extinf, seg.uri);
+  rebuilt.push('');
+  fs.writeFileSync(mainPlaylistPath, rebuilt.join('\n'), 'utf8');
 
   const prewarmRoot = path.join(outDir, '.hybrid-prewarm');
   if (fs.existsSync(prewarmRoot)) {

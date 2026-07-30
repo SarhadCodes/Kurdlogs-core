@@ -5,6 +5,7 @@ import { User } from '@prisma/client';
 export interface FfmpegProcessInfo {
   pid: number;
   channelId: string;
+  slug: string;
   process: ChildProcess;
   inputType: string;
   playbackSource?: 'BLUEPRINT' | 'PLAYLIST' | 'MCR_BUS' | 'MCR_SWITCHER';

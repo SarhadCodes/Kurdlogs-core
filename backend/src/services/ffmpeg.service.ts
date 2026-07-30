@@ -13,6 +13,7 @@ import { monitorService } from './monitor.service';
 import { playlistService } from './playlist.service';
 import { gpuEncoderService } from './gpuEncoder.service';
 import { graphicsBurnInService } from './graphics/graphicsBurnIn.service';
+import { hasRecentHlsSegments } from '../utils/streamPaths';
 
 const FREEZE_TIMEOUT_MS = 30_000;
 const RTMP_FREEZE_TIMEOUT_MS = 120_000;
@@ -32,6 +33,7 @@ class FfmpegService {
   private processes: Map<string, FfmpegProcessInfo> = new Map();
   private blueprintPrewarmProcesses = new Map<string, ChildProcess>();
   private reconnectAttempts: Map<string, number> = new Map();
+  private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private watchdogTimer: NodeJS.Timeout | null = null;
 
   // ─── Watchdog ─────────────────────────────────────────────
@@ -79,6 +81,14 @@ class FfmpegService {
           await this.forceKill(channelId);
           continue;
         }
+      }
+
+      // A process may still be alive and writing logs while no media is being
+      // published. Segment freshness is the actual on-air health signal.
+      if (info.markedOnline && !hasRecentHlsSegments(info.slug, 45_000)) {
+        logger.error(`Watchdog: HLS output stalled for channel ${channelId}. Restarting.`);
+        monitorService.addLog(channelId, 'ERROR', 'Watchdog detected stalled HLS output. Restarting...');
+        await this.forceKill(channelId);
       }
     }
   }
@@ -400,24 +410,23 @@ class FfmpegService {
       return;
     }
 
-    const attempts = this.reconnectAttempts.get(channelId) || 0;
-    if (attempts >= channel.maxReconnectAttempts) {
-      logger.error(`Max reconnect attempts (${channel.maxReconnectAttempts}) reached for ${channel.name}. Giving up.`);
-      monitorService.addLog(channelId, 'ERROR', `Max reconnect attempts reached (${channel.maxReconnectAttempts}). Stream stopped.`);
-      await prisma.channel.update({ where: { id: channelId }, data: { status: 'OFFLINE' } });
-      wsService.emitChannelStatus(channelId, 'OFFLINE');
-      this.reconnectAttempts.delete(channelId);
+    if (this.reconnectTimers.has(channelId)) {
       return;
     }
 
+    const attempts = this.reconnectAttempts.get(channelId) || 0;
     this.reconnectAttempts.set(channelId, attempts + 1);
-    const delay = Math.min(channel.reconnectDelay * Math.pow(2, attempts), MAX_BACKOFF_MS);
+    const delay = Math.min(channel.reconnectDelay * Math.pow(2, Math.min(attempts, 8)), MAX_BACKOFF_MS);
 
     await prisma.channel.update({ where: { id: channelId }, data: { status: 'ERROR' } });
     wsService.emitChannelStatus(channelId, 'ERROR');
-    monitorService.addLog(channelId, 'WARN', `Reconnecting (${attempts + 1}/${channel.maxReconnectAttempts}) in ${Math.round(delay / 1000)}s...`);
+    const label = attempts + 1 > channel.maxReconnectAttempts
+      ? `Reconnecting continuously (attempt ${attempts + 1})`
+      : `Reconnecting (${attempts + 1}/${channel.maxReconnectAttempts})`;
+    monitorService.addLog(channelId, 'WARN', `${label} in ${Math.round(delay / 1000)}s...`);
 
-    setTimeout(async () => {
+    const timer = setTimeout(async () => {
+      this.reconnectTimers.delete(channelId);
       try {
         // Always reload latest channel config so reconnect does not use stale source URL.
         const latest = await prisma.channel.findUnique({
@@ -430,6 +439,7 @@ class FfmpegService {
         logger.error(`Reconnect failed for channel ${channelId}:`, err);
       }
     }, delay);
+    this.reconnectTimers.set(channelId, timer);
   }
 
   // ─── Process lifecycle helpers ────────────────────────────
@@ -444,6 +454,7 @@ class FfmpegService {
       channelId: channel.id,
       process: proc,
       inputType: channel.isPlaylistChannel ? 'PLAYLIST' : String(channel.sourceType || ''),
+      slug: channel.slug,
       playbackSource,
       startTime: new Date(),
       stats: { cpu: 0, ram: 0, gpu: 0, bitrate: 0, fps: 0, uptime: 0, frames: 0, speed: '0x' },
@@ -1618,6 +1629,9 @@ class FfmpegService {
   /** Clear reconnect backoff so manual Start works after fixing config. */
   public clearReconnectState(channelId: string): void {
     this.reconnectAttempts.delete(channelId);
+    const timer = this.reconnectTimers.get(channelId);
+    if (timer) clearTimeout(timer);
+    this.reconnectTimers.delete(channelId);
   }
 
   // ─── Utilities ───────────────────────────────────────────

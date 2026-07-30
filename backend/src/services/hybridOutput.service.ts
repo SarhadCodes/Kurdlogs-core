@@ -30,6 +30,7 @@ import {
 } from '../utils/hybridHls';
 import { matchesHybridTarget, probeStream } from './streamProbe.service';
 import { ffmpegService } from './ffmpeg.service';
+import { hasRecentHlsSegments } from '../utils/streamPaths';
 
 const IPTV_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const KILL_GRACE_MS = 5000;
@@ -81,11 +82,14 @@ interface HybridProcessEntry {
 const LIVE_PREWARM_MIN_SEGMENTS = 3;
 const BLUEPRINT_PREWARM_MIN_SEGMENTS = 2;
 const PREWARM_WAIT_MS = 15_000;
+const LIVE_OUTPUT_STALL_MS = 45_000;
+const LIVE_OUTPUT_WATCHDOG_MS = 15_000;
 
 class HybridOutputService {
   private processes = new Map<string, HybridProcessEntry>();
   private prewarmProcesses = new Map<string, PrewarmEntry>();
   private intentionalStop = new Set<string>();
+  private liveWatchdogs = new Map<string, NodeJS.Timeout>();
 
   isRunning(channelId: string): boolean {
     return this.processes.has(channelId);
@@ -93,6 +97,7 @@ class HybridOutputService {
 
   async stop(channelId: string): Promise<void> {
     await this.stopLivePrewarm(channelId);
+    this.clearLiveWatchdog(channelId);
 
     const entry = this.processes.get(channelId);
     if (!entry) return;
@@ -430,6 +435,30 @@ class HybridOutputService {
     await this.gracefulKill(entry.process);
   }
 
+  private clearLiveWatchdog(channelId: string): void {
+    const timer = this.liveWatchdogs.get(channelId);
+    if (timer) clearInterval(timer);
+    this.liveWatchdogs.delete(channelId);
+  }
+
+  private startLiveWatchdog(channelId: string, slug: string, proc: ChildProcess): void {
+    this.clearLiveWatchdog(channelId);
+    const timer = setInterval(() => {
+      const active = this.processes.get(channelId);
+      if (!active || active.process.pid !== proc.pid) {
+        this.clearLiveWatchdog(channelId);
+        return;
+      }
+      if (hasRecentHlsSegments(slug, LIVE_OUTPUT_STALL_MS)) return;
+
+      logger.error(`[HYBRID] live output stalled channel=${slug}; restarting decoder`);
+      monitorService.addLog(channelId, 'ERROR', 'Hybrid live output stalled. Restarting decoder...');
+      this.clearLiveWatchdog(channelId);
+      void this.gracefulKill(proc);
+    }, LIVE_OUTPUT_WATCHDOG_MS);
+    this.liveWatchdogs.set(channelId, timer);
+  }
+
   /** Pre-probe live URL while station ID plays — cuts dead air before OBS handoff. */
   async prepareLiveFeed(
     liveFeedUrl: string,
@@ -512,6 +541,7 @@ class HybridOutputService {
 
     const proc = spawn(env.FFMPEG_PATH, args);
     this.processes.set(channel.id, { process: proc, kind: 'live' });
+    this.startLiveWatchdog(channel.id, channel.slug, proc);
 
     await prisma.hybridChannelState.update({
       where: { channelId: channel.id },
@@ -535,6 +565,7 @@ class HybridOutputService {
     }
 
     proc.on('close', async (code) => {
+      this.clearLiveWatchdog(channel.id);
       const intentional = this.intentionalStop.has(channel.id) || !this.processes.has(channel.id);
       this.processes.delete(channel.id);
 
