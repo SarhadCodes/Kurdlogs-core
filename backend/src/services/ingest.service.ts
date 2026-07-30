@@ -28,6 +28,7 @@ export interface VideoProbe {
   pixFmt: string;
   fps: number;
   audioCodec: string | null;
+  audioSampleRate: number | null;
   durationSec: number;
 }
 
@@ -120,6 +121,7 @@ class IngestService {
             pixFmt: String(video.pix_fmt || '').toLowerCase(),
             fps: this.parseFps(video.avg_frame_rate || video.r_frame_rate),
             audioCodec: audio ? String(audio.codec_name || '').toLowerCase() : null,
+            audioSampleRate: audio ? Number(audio.sample_rate) || null : null,
             durationSec: dur,
           });
         } catch {
@@ -134,6 +136,10 @@ class IngestService {
     if (probe.codec !== 'h264') return false;
     if (!['yuv420p', 'yuvj420p'].includes(probe.pixFmt)) return false;
     if (probe.audioCodec && probe.audioCodec !== 'aac') return false;
+    // The concat demuxer treats the stream parameters from the first item as
+    // the contract for every later item. A 44.1 kHz AAC file followed by a
+    // 48 kHz AAC file can therefore freeze a live output at the boundary.
+    if (probe.audioCodec && probe.audioSampleRate !== 48000) return false;
     if (probe.width > targetW || probe.height > targetH) return false;
     if (probe.fps > 0 && Math.abs(probe.fps - PLAYLIST_FPS) > 0.6) return false;
     return true;

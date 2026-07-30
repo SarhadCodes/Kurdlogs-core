@@ -101,6 +101,9 @@ class PlaylistService {
     }
 
     const itemsCount = await prisma.playlistItem.count({ where: { playlistId } });
+    // A broadcast concat must have one known media contract. Keep the legacy
+    // flag in the API for compatibility, but never put a raw upload on-air.
+    normalize = true;
 
     let itemLogoConfig: LogoBurnConfig | null = null;
     if (brandProfileId === 'none') {
@@ -117,7 +120,7 @@ class PlaylistService {
         originalFilename,
         position: itemsCount,
         duration,
-        status: normalize ? 'PROCESSING' : 'READY',
+        status: 'PROCESSING',
         ...(itemLogoConfig ? { logoConfig: itemLogoConfig as object } : {}),
       },
     });
@@ -145,12 +148,6 @@ class PlaylistService {
         brandConfig: brand,
         skipBrand: !brand,
         jobType: 'INGEST',
-      });
-    } else {
-      await this.generateConcatFile(playlistId, false, true, {
-        changeType: 'add',
-        newMedia: originalFilename,
-        itemId: item.id,
       });
     }
 

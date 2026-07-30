@@ -842,7 +842,14 @@ class FfmpegService {
     if (this.hasMissingImageOverlay({ ...channel, overlays: playlistOverlays }, filterComplex)) return;
 
     const playlistMaps = this.preparePlaylistVideoMap(filterComplex, channel, encoder.pixelFormat, graphicsCanvas);
-    args.push('-filter_complex', playlistMaps.filterComplex);
+    // Resample inside the graph before HLS encoding. This protects existing
+    // legacy playlists while their items are being normalized and prevents an
+    // AAC clock change between two clips from stalling the output.
+    const audioFilter = hasSourceAudio
+      ? '[0:a]aresample=48000:async=1000:first_pts=0,asetpts=N/SR/TB[aout]'
+      : '';
+    args.push('-filter_complex', [playlistMaps.filterComplex, audioFilter].filter(Boolean).join(';'));
+    if (hasSourceAudio) audioMap = '[aout]';
 
     this.appendPlaylistStreamOutputs(
       args,
