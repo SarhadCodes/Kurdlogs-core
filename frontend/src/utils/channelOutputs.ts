@@ -86,17 +86,24 @@ export function buildChannelOutputSections(
   const { slug } = channel;
   const tokenValue = activeToken?.token;
   const tokenProtected = playUrls?.tokenProtected ?? !!activeToken;
+  // The server emits one delivery format per channel.  Do not present DASH
+  // URLs for an HLS channel: a manifest.mpd does not exist in that output and
+  // VLC/browser clients correctly reject the resulting 404.
+  const supportsDash = channel.outputType === 'DASH';
 
   const publicHls = playUrls?.urls.publicHls ?? `${base}/stream/${slug}/master.m3u8`;
-  const publicDash = playUrls?.urls.publicDash ?? `${base}/stream/${slug}/manifest.mpd`;
+  const publicDash = supportsDash
+    ? (playUrls?.urls.publicDash ?? `${base}/stream/${slug}/manifest.mpd`)
+    : null;
   const tokenHls =
     playUrls?.urls.hlsWithToken ??
     (tokenValue ? buildTokenStreamUrl(base, slug, tokenValue, 'master.m3u8') : null);
-  const tokenDash =
-    playUrls?.urls.dashWithToken ??
-    (tokenValue ? buildTokenStreamUrl(base, slug, tokenValue, 'manifest.mpd') : null);
+  const tokenDash = supportsDash
+    ? (playUrls?.urls.dashWithToken ??
+      (tokenValue ? buildTokenStreamUrl(base, slug, tokenValue, 'manifest.mpd') : null))
+    : null;
   const stableHls = playUrls?.urls.stableHls;
-  const stableDash = playUrls?.urls.stableDash;
+  const stableDash = supportsDash ? playUrls?.urls.stableDash : null;
 
   const sections: ChannelOutputSection[] = [];
 
@@ -212,14 +219,18 @@ export function buildChannelOutputSections(
           url: publicHls,
           authType: 'none',
         },
-        {
-          id: 'public-dash',
-          protocol: 'DASH',
-          title: 'DASH',
-          description: 'manifest.mpd',
-          url: publicDash,
-          authType: 'none',
-        },
+        ...(publicDash
+          ? [
+              {
+                id: 'public-dash',
+                protocol: 'DASH',
+                title: 'DASH',
+                description: 'manifest.mpd',
+                url: publicDash,
+                authType: 'none' as const,
+              },
+            ]
+          : []),
         {
           id: 'public-embed',
           protocol: 'EMBED',
@@ -252,14 +263,18 @@ export function buildChannelOutputSections(
           url: adminHls,
           authType: 'admin',
         },
-        {
-          id: 'admin-dash',
-          protocol: 'DASH',
-          title: 'DASH',
-          description: 'manifest.mpd (session cookie)',
-          url: adminDash,
-          authType: 'admin',
-        },
+        ...(supportsDash
+          ? [
+              {
+                id: 'admin-dash',
+                protocol: 'DASH',
+                title: 'DASH',
+                description: 'manifest.mpd (session cookie)',
+                url: adminDash,
+                authType: 'admin' as const,
+              },
+            ]
+          : []),
         {
           id: 'admin-embed',
           protocol: 'EMBED',
