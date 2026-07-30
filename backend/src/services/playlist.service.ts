@@ -304,7 +304,17 @@ class PlaylistService {
       content = singlePass.repeat(repeats);
     }
 
-    fs.writeFileSync(filePath, content, 'utf8');
+    // The same playlist may be read by several channel decoders at once.
+    // Replace its concat manifest atomically so FFmpeg sees either the old
+    // complete list or the new complete list—never a file being truncated or
+    // written while it is opened by another channel.
+    const tempPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      fs.writeFileSync(tempPath, content, 'utf8');
+      fs.renameSync(tempPath, filePath);
+    } finally {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    }
     if (restartLive) {
       const { blueprintPlaylistSyncService } = await import('./blueprintPlaylistSync.service');
       await blueprintPlaylistSyncService.handlePlaylistMutation({
