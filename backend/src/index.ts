@@ -18,6 +18,7 @@ import { prisma } from './config/database';
 
 const app = express();
 const server = http.createServer(app);
+let ready = false;
 
 // Allow large playlist uploads (nginx also needs long proxy timeouts).
 server.timeout = 7_200_000;
@@ -57,6 +58,12 @@ app.use(
 app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
+
+// Container/orchestrator readiness probe. It deliberately has no auth and
+// only becomes healthy after the database connection and core workers start.
+app.get('/healthz', (_req, res) => {
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ok' : 'starting' });
+});
 
 // Serve static uploads
 app.use('/uploads', express.static(env.UPLOADS_DIR));
@@ -146,6 +153,8 @@ server.listen(env.PORT, async () => {
 
      const { mcrIngestService } = await import('./services/mcrIngest.service');
      mcrIngestService.startPoller();
+
+     ready = true;
 
      // Recover channels that were running before shutdown (after MCR bus is ready)
      await ffmpegService.recoverChannels();
