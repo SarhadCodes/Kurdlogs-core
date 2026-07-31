@@ -756,11 +756,39 @@ class BlueprintPlaybackService {
     const windowSegments: BlueprintWindowSegment[] = [];
     let content = 'ffconcat version 1.0\n';
     const concatEntries: string[] = [];
+    const compatibility = new Map<string, boolean>();
+    const { ingestService } = await import('./ingest.service');
 
     for (const seg of segments) {
       const pl = seg.playlistId ? playlists.get(seg.playlistId) : undefined;
       const item = pl?.items.find((i) => i.id === seg.itemId);
       if (!item?.videoPath) continue;
+      let canonical = compatibility.get(item.videoPath);
+      if (canonical === undefined) {
+        const mediaProbe = await ingestService.probeInput(item.videoPath);
+        canonical = !!mediaProbe && ingestService.isBroadcastCanonical(mediaProbe);
+        compatibility.set(item.videoPath, canonical);
+      }
+      if (!canonical) {
+        const sourcePath = ingestService.resolveSourcePath({
+          id: item.id,
+          videoPath: item.videoPath,
+        });
+        if (sourcePath && seg.playlistId && !ingestService.isProcessing(item.id)) {
+          logger.warn(
+            `[BROADCAST_NORMALIZE] itemId=${item.id} playlistId=${seg.playlistId} ` +
+              `action=reencode_noncanonical path=${item.videoPath}`
+          );
+          ingestService.enqueueIngest({
+            itemId: item.id,
+            playlistId: seg.playlistId,
+            sourcePath,
+            skipBrand: true,
+            jobType: 'INGEST',
+          });
+        }
+        continue;
+      }
       const probed = await probeMediaDurationSec(item.videoPath);
       const playbackDurationSec = probed ?? item.durationSec ?? seg.durationSec;
       const safePath = item.videoPath.replace(/\\/g, '/').replace(/'/g, "'\\''");

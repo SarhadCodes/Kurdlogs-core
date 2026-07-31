@@ -27,8 +27,10 @@ export interface VideoProbe {
   height: number;
   pixFmt: string;
   fps: number;
+  videoTimeBase: string;
   audioCodec: string | null;
   audioSampleRate: number | null;
+  audioChannels: number | null;
   durationSec: number;
 }
 
@@ -120,8 +122,10 @@ class IngestService {
             height: Number(video.height) || 0,
             pixFmt: String(video.pix_fmt || '').toLowerCase(),
             fps: this.parseFps(video.avg_frame_rate || video.r_frame_rate),
+            videoTimeBase: String(video.time_base || ''),
             audioCodec: audio ? String(audio.codec_name || '').toLowerCase() : null,
             audioSampleRate: audio ? Number(audio.sample_rate) || null : null,
+            audioChannels: audio ? Number(audio.channels) || null : null,
             durationSec: dur,
           });
         } catch {
@@ -143,6 +147,21 @@ class IngestService {
     if (probe.width > targetW || probe.height > targetH) return false;
     if (probe.fps > 0 && Math.abs(probe.fps - PLAYLIST_FPS) > 0.6) return false;
     return true;
+  }
+
+  /** Exact media contract required by the long-running concat playout path. */
+  isBroadcastCanonical(probe: VideoProbe): boolean {
+    return (
+      probe.codec === 'h264' &&
+      probe.width === OUT_W &&
+      probe.height === OUT_H &&
+      probe.pixFmt === 'yuv420p' &&
+      Math.abs(probe.fps - PLAYLIST_FPS) < 0.01 &&
+      probe.videoTimeBase === '1/12288' &&
+      probe.audioCodec === 'aac' &&
+      probe.audioSampleRate === 48000 &&
+      probe.audioChannels === 2
+    );
   }
 
   private vfStandard(): string {
@@ -294,15 +313,9 @@ class IngestService {
         attempts: [this.buildUnifiedBrand(inputPath, outputPath, brand, codecMode)],
       };
     }
-    if (probe && this.isRemuxCompatible(probe)) {
-      return {
-        mode: 'remux',
-        attempts: [
-          this.buildRemux(inputPath, outputPath, codecMode, !!probe?.audioCodec),
-          this.buildTranscode(inputPath, outputPath, codecMode, !!probe?.audioCodec),
-        ],
-      };
-    }
+    // Broadcast playlist files are always encoded to one exact contract.
+    // MP4 remuxing preserves source-specific time bases and decoder metadata;
+    // those differences can reset timestamps when the concat demuxer advances.
     return {
       mode: 'transcode',
       attempts: [this.buildTranscode(inputPath, outputPath, codecMode, !!probe?.audioCodec)],
