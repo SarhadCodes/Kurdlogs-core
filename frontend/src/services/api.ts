@@ -354,7 +354,7 @@ export const blueprintApi = {
     api.post<any, ApiResponse<import('../types').PublishBlueprintResult>>(`/blueprints/${id}/publish`, {
       channelId,
       blocks,
-    }),
+    }, { timeout: 0 }),
 };
 
 export const boostApi = {

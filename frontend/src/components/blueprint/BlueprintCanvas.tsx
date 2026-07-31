@@ -326,12 +326,21 @@ export default function BlueprintCanvas({
 
   return (
     <div className="flex gap-4 h-full min-h-0">
-      <div className="w-44 shrink-0 space-y-1.5">
+      <div className="w-44 shrink-0 overflow-y-auto pr-1 space-y-1.5">
         <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 px-1">Blocks</p>
         <p className="text-[10px] text-gray-600 px-1 mb-2 leading-snug">
           Click to add{selectedBlockId ? ' after selection' : ' before Loop'}.
         </p>
+        <button
+          type="button"
+          onClick={() => onAddBlock('SCHEDULE', selectedBlockId)}
+          className="w-full rounded-lg border border-violet-400/70 bg-violet-950/60 px-3 py-2.5 text-left text-sm font-semibold text-violet-100 shadow-[0_0_18px_rgba(139,92,246,0.16)] transition hover:bg-violet-900/70"
+        >
+          <span className="flex items-center gap-1.5"><Clock3 className="h-3.5 w-3.5" /> Set movie / music time</span>
+          <span className="mt-1 block text-[10px] font-normal text-violet-200/70">Choose a daily start and end time</span>
+        </button>
         {BLOCK_PALETTE.map((item) => (
+          item.type === 'SCHEDULE' ? null : (
           <button
             key={item.type}
             type="button"
@@ -340,6 +349,7 @@ export default function BlueprintCanvas({
           >
             {item.label}
           </button>
+          )
         ))}
       </div>
 
