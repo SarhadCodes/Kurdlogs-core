@@ -14,6 +14,7 @@ import { playlistService } from './playlist.service';
 import { gpuEncoderService } from './gpuEncoder.service';
 import { graphicsBurnInService } from './graphics/graphicsBurnIn.service';
 import { hasRecentHlsSegments } from '../utils/streamPaths';
+import { hlsContentHealthService } from './hlsContentHealth.service';
 
 const FREEZE_TIMEOUT_MS = 30_000;
 const RTMP_FREEZE_TIMEOUT_MS = 120_000;
@@ -23,6 +24,8 @@ const ONLINE_CONFIRM_RETRIES = 6;
 const ONLINE_CONFIRM_RETRY_MS = 5_000;
 const MAX_BACKOFF_MS = 60_000;
 const KILL_GRACE_MS = 5_000;
+const CONTENT_PROBE_INTERVAL_MS = 30_000;
+const CONTENT_FAILURE_LIMIT = 2;
 
 /** HLS tuning — longer segments + deeper playlist = fewer VLC micro-stalls */
 const HLS_SEGMENT_SECONDS = 6;
@@ -35,6 +38,10 @@ class FfmpegService {
   private reconnectAttempts: Map<string, number> = new Map();
   private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private watchdogTimer: NodeJS.Timeout | null = null;
+  private contentProbeState = new Map<
+    string,
+    { lastProbeAt: number; lastSegment: string | null; failures: number; probing: boolean }
+  >();
 
   // ─── Watchdog ─────────────────────────────────────────────
 
@@ -89,7 +96,77 @@ class FfmpegService {
         logger.error(`Watchdog: HLS output stalled for channel ${channelId}. Restarting.`);
         monitorService.addLog(channelId, 'ERROR', 'Watchdog detected stalled HLS output. Restarting...');
         await this.forceKill(channelId);
+        continue;
       }
+
+      if (
+        info.markedOnline &&
+        (info.playbackSource === 'BLUEPRINT' || info.playbackSource === 'PLAYLIST')
+      ) {
+        void this.checkPublishedContent(channelId, info);
+      }
+    }
+  }
+
+  /**
+   * Segment freshness cannot detect a decoder that is publishing a black
+   * canvas. Probe completed HLS segments and require repeated failures before
+   * restarting, so ordinary fades/cuts do not interrupt the channel.
+   */
+  private async checkPublishedContent(
+    channelId: string,
+    info: FfmpegProcessInfo
+  ): Promise<void> {
+    const now = Date.now();
+    const state = this.contentProbeState.get(channelId) ?? {
+      lastProbeAt: 0,
+      lastSegment: null,
+      failures: 0,
+      probing: false,
+    };
+
+    if (state.probing || now - state.lastProbeAt < CONTENT_PROBE_INTERVAL_MS) return;
+    state.probing = true;
+    state.lastProbeAt = now;
+    this.contentProbeState.set(channelId, state);
+
+    try {
+      const result = await hlsContentHealthService.probe(info.slug);
+      const active = this.processes.get(channelId);
+      if (!active || active.pid !== info.pid) return;
+
+      // Never count the same completed segment twice.
+      if (result.segmentPath && result.segmentPath === state.lastSegment) return;
+      state.lastSegment = result.segmentPath;
+
+      if (result.status === 'healthy' || result.status === 'missing') {
+        state.failures = 0;
+        return;
+      }
+
+      state.failures += 1;
+      logger.warn(
+        `[CONTENT_WATCHDOG] channel=${info.slug} status=${result.status} ` +
+          `failures=${state.failures}/${CONTENT_FAILURE_LIMIT} ` +
+          `segment=${result.segmentPath ?? 'none'} size=${result.segmentSize ?? 0} ` +
+          `blackDuration=${result.blackDuration.toFixed(2)}`
+      );
+
+      if (state.failures < CONTENT_FAILURE_LIMIT) return;
+
+      state.failures = 0;
+      monitorService.addLog(
+        channelId,
+        'ERROR',
+        result.status === 'black'
+          ? 'Content watchdog detected sustained black video. Recovering channel...'
+          : 'Content watchdog could not decode the published video. Recovering channel...'
+      );
+      await this.forceKill(channelId);
+    } catch (error) {
+      logger.warn(`[CONTENT_WATCHDOG] probe failed channel=${info.slug}:`, error);
+    } finally {
+      state.probing = false;
     }
   }
 
@@ -462,6 +539,7 @@ class FfmpegService {
       markedOnline: false,
       sourceUnreachable: false,
     };
+    this.contentProbeState.delete(channel.id);
     this.processes.set(channel.id, info);
     return info;
   }

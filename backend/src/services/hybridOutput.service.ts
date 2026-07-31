@@ -31,6 +31,7 @@ import {
 import { matchesHybridTarget, probeStream } from './streamProbe.service';
 import { ffmpegService } from './ffmpeg.service';
 import { hasRecentHlsSegments } from '../utils/streamPaths';
+import { hlsContentHealthService } from './hlsContentHealth.service';
 
 const IPTV_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const KILL_GRACE_MS = 5000;
@@ -84,12 +85,16 @@ const BLUEPRINT_PREWARM_MIN_SEGMENTS = 2;
 const PREWARM_WAIT_MS = 15_000;
 const LIVE_OUTPUT_STALL_MS = 45_000;
 const LIVE_OUTPUT_WATCHDOG_MS = 15_000;
+const LIVE_CONTENT_FAILURE_LIMIT = 3;
 
 class HybridOutputService {
   private processes = new Map<string, HybridProcessEntry>();
   private prewarmProcesses = new Map<string, PrewarmEntry>();
   private intentionalStop = new Set<string>();
   private liveWatchdogs = new Map<string, NodeJS.Timeout>();
+  private liveContentFailures = new Map<string, number>();
+  private liveContentProbeRunning = new Set<string>();
+  private liveContentLastSegment = new Map<string, string>();
 
   isRunning(channelId: string): boolean {
     return this.processes.has(channelId);
@@ -439,6 +444,9 @@ class HybridOutputService {
     const timer = this.liveWatchdogs.get(channelId);
     if (timer) clearInterval(timer);
     this.liveWatchdogs.delete(channelId);
+    this.liveContentFailures.delete(channelId);
+    this.liveContentProbeRunning.delete(channelId);
+    this.liveContentLastSegment.delete(channelId);
   }
 
   private startLiveWatchdog(channelId: string, slug: string, proc: ChildProcess): void {
@@ -449,7 +457,10 @@ class HybridOutputService {
         this.clearLiveWatchdog(channelId);
         return;
       }
-      if (hasRecentHlsSegments(slug, LIVE_OUTPUT_STALL_MS)) return;
+      if (hasRecentHlsSegments(slug, LIVE_OUTPUT_STALL_MS)) {
+        void this.checkLiveContent(channelId, slug, proc);
+        return;
+      }
 
       logger.error(`[HYBRID] live output stalled channel=${slug}; restarting decoder`);
       monitorService.addLog(channelId, 'ERROR', 'Hybrid live output stalled. Restarting decoder...');
@@ -457,6 +468,56 @@ class HybridOutputService {
       void this.gracefulKill(proc);
     }, LIVE_OUTPUT_WATCHDOG_MS);
     this.liveWatchdogs.set(channelId, timer);
+  }
+
+  private async checkLiveContent(channelId: string, slug: string, proc: ChildProcess): Promise<void> {
+    if (this.liveContentProbeRunning.has(channelId)) return;
+    this.liveContentProbeRunning.add(channelId);
+
+    try {
+      const result = await hlsContentHealthService.probe(slug);
+      const active = this.processes.get(channelId);
+      if (!active || active.process.pid !== proc.pid) return;
+
+      if (
+        result.segmentPath &&
+        this.liveContentLastSegment.get(channelId) === result.segmentPath
+      ) {
+        return;
+      }
+      if (result.segmentPath) this.liveContentLastSegment.set(channelId, result.segmentPath);
+
+      if (result.status === 'healthy' || result.status === 'missing') {
+        this.liveContentFailures.set(channelId, 0);
+        return;
+      }
+
+      const failures = (this.liveContentFailures.get(channelId) ?? 0) + 1;
+      this.liveContentFailures.set(channelId, failures);
+      logger.warn(
+        `[HYBRID_CONTENT_WATCHDOG] channel=${slug} status=${result.status} ` +
+          `failures=${failures}/${LIVE_CONTENT_FAILURE_LIMIT} ` +
+          `segment=${result.segmentPath ?? 'none'} size=${result.segmentSize ?? 0} ` +
+          `blackDuration=${result.blackDuration.toFixed(2)}`
+      );
+
+      if (failures < LIVE_CONTENT_FAILURE_LIMIT) return;
+
+      this.liveContentFailures.set(channelId, 0);
+      monitorService.addLog(
+        channelId,
+        'ERROR',
+        result.status === 'black'
+          ? 'Hybrid content watchdog detected sustained black video. Reconnecting live feed...'
+          : 'Hybrid content watchdog detected undecodable video. Reconnecting live feed...'
+      );
+      this.clearLiveWatchdog(channelId);
+      await this.gracefulKill(proc);
+    } catch (error) {
+      logger.warn(`[HYBRID_CONTENT_WATCHDOG] probe failed channel=${slug}:`, error);
+    } finally {
+      this.liveContentProbeRunning.delete(channelId);
+    }
   }
 
   /** Pre-probe live URL while station ID plays — cuts dead air before OBS handoff. */
