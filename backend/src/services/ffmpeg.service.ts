@@ -226,18 +226,61 @@ class FfmpegService {
       if (state.failures < CONTENT_FAILURE_LIMIT) return;
 
       state.failures = 0;
+      const quarantined = await this.quarantineCurrentBlueprintItem(channelId, info, result.status);
       monitorService.addLog(
         channelId,
         'ERROR',
-        result.status === 'black'
-          ? 'Content watchdog detected sustained black video. Recovering channel...'
-          : 'Content watchdog could not decode the published video. Recovering channel...'
+        quarantined
+          ? `Content watchdog removed failing media "${quarantined}" and is continuing with the next playable item.`
+          : result.status === 'black'
+            ? 'Content watchdog detected sustained black video. Recovering channel...'
+            : 'Content watchdog could not decode the published video. Recovering channel...'
       );
       await this.forceKill(channelId);
     } catch (error) {
       logger.warn(`[CONTENT_WATCHDOG] probe failed channel=${info.slug}:`, error);
     } finally {
       state.probing = false;
+    }
+  }
+
+  /**
+   * A restart alone can replay the same corrupt or all-black normalized asset.
+   * For Blueprint playback we know the exact active PlaylistItem, so quarantine
+   * it after repeated failed HLS probes. The next window is regenerated from
+   * READY items only before the encoder reconnects.
+   */
+  private async quarantineCurrentBlueprintItem(
+    channelId: string,
+    info: FfmpegProcessInfo,
+    failure: 'black' | 'invalid'
+  ): Promise<string | null> {
+    if (info.playbackSource !== 'BLUEPRINT') return null;
+
+    try {
+      const { blueprintPlaybackService } = await import('./blueprintPlayback.service');
+      const runtime = blueprintPlaybackService.syncPlaybackFromFfmpeg(channelId);
+      const current = runtime?.segments[runtime.currentIndex];
+      if (!current?.itemId) return null;
+
+      const updated = await prisma.playlistItem.updateMany({
+        where: { id: current.itemId, status: 'READY' },
+        data: {
+          status: 'FAILED',
+          processingError: `Automatically quarantined after sustained ${failure} output on ${new Date().toISOString()}`,
+        },
+      });
+      if (updated.count === 0) return null;
+
+      await blueprintPlaybackService.refreshChannelWindow(channelId, { reason: 'playlist_mutation' });
+      logger.error(
+        `[CONTENT_WATCHDOG] quarantined itemId=${current.itemId} title=${current.title} ` +
+          `channel=${info.slug} reason=${failure}`
+      );
+      return current.title;
+    } catch (error) {
+      logger.error(`[CONTENT_WATCHDOG] unable to quarantine failing content channel=${info.slug}:`, error);
+      return null;
     }
   }
 
