@@ -376,6 +376,16 @@ export type BlueprintBlockType =
   | 'LOOP';
 
 export type SuperPlayMode = 'COUNT' | 'ALL';
+export type ScheduledContentType = Exclude<BlueprintBlockType, 'SCHEDULE' | 'LOOP'>;
+
+export interface BlueprintScheduleRule {
+  enabled?: boolean;
+  startTime?: string;
+  endTime?: string;
+  contentType?: ScheduledContentType;
+  timezone?: string;
+  exclusive?: boolean;
+}
 
 export interface BlueprintBlock {
   id: string;
@@ -386,6 +396,7 @@ export interface BlueprintBlock {
     selectionMode?: 'RANDOM' | 'SEQUENTIAL';
     repeatCount?: number;
     superPlayMode?: SuperPlayMode;
+    scheduleRules?: BlueprintScheduleRule;
     transitionIn?: {
       mode: 'ALWAYS' | 'EVERY_N_ITEMS' | 'EVERY_N_MINUTES';
       value?: number;

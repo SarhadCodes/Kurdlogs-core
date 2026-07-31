@@ -18,7 +18,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { ArrowDown, GripVertical, Plus, Settings2, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import type { BlueprintBlock, BlueprintBlockType, BlueprintSummary, Playlist } from '../../types';
+import type { BlueprintBlock, BlueprintBlockType, BlueprintSummary, Playlist, ScheduledContentType } from '../../types';
 import { BLOCK_PALETTE, blockMeta } from './blockMeta';
 import { defaultTransitionAfter, transitionLabel } from './transitionUtils';
 
@@ -40,6 +40,14 @@ function formatDuration(sec: number) {
   const h = Math.floor(sec / 3600);
   const m = Math.round((sec % 3600) / 60);
   return m > 0 ? `${h}h ${m}m` : `${h}h`;
+}
+
+function scheduleSummary(block: BlueprintBlock): string | null {
+  if (block.type !== 'SCHEDULE') return null;
+  const rule = block.config.scheduleRules;
+  if (!rule?.startTime || !rule?.endTime) return 'Configure daily time window';
+  const kind = (rule.contentType || 'MOVIE').toLowerCase();
+  return `${rule.startTime}–${rule.endTime} • ${kind}`;
 }
 
 function playlistInsight(
@@ -86,6 +94,7 @@ function BlockCard({
         ? 'Plays entire playlist'
         : `Plays ${block.config.repeatCount ?? 5} videos`
       : null;
+  const scheduleHint = scheduleSummary(block);
 
   return (
     <div
@@ -108,7 +117,7 @@ function BlockCard({
         <div className="flex-1 min-w-0">
           <p className="font-semibold text-white">{block.label || meta.label}</p>
           <p className="text-xs text-gray-500 mt-0.5">
-            {superHint || meta.description}
+            {scheduleHint || superHint || meta.description}
           </p>
         </div>
         {block.type !== 'LOOP' && (
@@ -482,7 +491,7 @@ export default function BlueprintCanvas({
                   />
                 </label>
                 <label className="block text-xs text-gray-400">
-                  Playlist
+                  {selected.type === 'SCHEDULE' ? 'Scheduled content playlist' : 'Playlist'}
                   <select
                     className="mt-1 w-full bg-black border border-[#333] rounded-lg px-2 py-2 text-sm text-white"
                     value={selected.config.playlistId || ''}
@@ -570,6 +579,74 @@ export default function BlueprintCanvas({
                       block — ideal for music hours or back-to-back episodes.
                     </p>
                   </>
+                )}
+
+                {selected.type === 'SCHEDULE' && (
+                  <div className="space-y-3 rounded-lg border border-slate-700/70 bg-slate-950/40 p-3">
+                    <div>
+                      <p className="text-xs font-semibold text-white">Daily schedule window</p>
+                      <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
+                        This playlist takes over while the window is active. A video already playing is allowed to finish before the next scheduled item starts.
+                      </p>
+                    </div>
+                    <label className="block text-xs text-gray-400">
+                      Content type
+                      <select
+                        className="mt-1 w-full bg-black border border-[#333] rounded-lg px-2 py-2 text-sm text-white"
+                        value={selected.config.scheduleRules?.contentType || 'MOVIE'}
+                        onChange={(e) => updateSelected({ scheduleRules: { ...selected.config.scheduleRules, contentType: e.target.value as ScheduledContentType } })}
+                      >
+                        <option value="MOVIE">Movies</option>
+                        <option value="MUSIC">Music</option>
+                        <option value="CARTOON">Cartoons</option>
+                        <option value="PROMO">Promos</option>
+                        <option value="INTRO">Intros</option>
+                        <option value="STATION_ID">Station IDs</option>
+                      </select>
+                    </label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <label className="block text-xs text-gray-400">
+                        Start time
+                        <input
+                          type="time"
+                          className="mt-1 w-full bg-black border border-[#333] rounded-lg px-2 py-2 text-sm text-white"
+                          value={selected.config.scheduleRules?.startTime || '18:00'}
+                          onChange={(e) => updateSelected({ scheduleRules: { ...selected.config.scheduleRules, enabled: true, startTime: e.target.value } })}
+                        />
+                      </label>
+                      <label className="block text-xs text-gray-400">
+                        End time
+                        <input
+                          type="time"
+                          className="mt-1 w-full bg-black border border-[#333] rounded-lg px-2 py-2 text-sm text-white"
+                          value={selected.config.scheduleRules?.endTime || '23:59'}
+                          onChange={(e) => updateSelected({ scheduleRules: { ...selected.config.scheduleRules, enabled: true, endTime: e.target.value } })}
+                        />
+                      </label>
+                    </div>
+                    <label className="block text-xs text-gray-400">
+                      Timezone
+                      <select
+                        className="mt-1 w-full bg-black border border-[#333] rounded-lg px-2 py-2 text-sm text-white"
+                        value={selected.config.scheduleRules?.timezone || 'Asia/Baghdad'}
+                        onChange={(e) => updateSelected({ scheduleRules: { ...selected.config.scheduleRules, timezone: e.target.value } })}
+                      >
+                        <option value="Asia/Baghdad">Baghdad (GMT+3)</option>
+                        <option value="UTC">UTC</option>
+                        <option value="Europe/London">London</option>
+                        <option value="America/New_York">New York</option>
+                      </select>
+                    </label>
+                    <label className="flex items-start gap-2 text-xs text-gray-300 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 accent-violet-500"
+                        checked={selected.config.scheduleRules?.exclusive !== false}
+                        onChange={(e) => updateSelected({ scheduleRules: { ...selected.config.scheduleRules, exclusive: e.target.checked } })}
+                      />
+                      <span><span className="font-medium text-white">Only scheduled content</span><br /><span className="text-gray-500">Pause normal Blueprint blocks during this window.</span></span>
+                    </label>
+                  </div>
                 )}
               </div>
             )}

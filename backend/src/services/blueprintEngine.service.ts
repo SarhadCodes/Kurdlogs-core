@@ -3,6 +3,7 @@ import type {
   BlueprintBlock,
   BlueprintBlockType,
   BlueprintRuntimeState,
+  BlueprintScheduleRule,
   ResolvedSegment,
   SimulationResult,
   SimulationWarning,
@@ -40,6 +41,62 @@ const CONTENT_TYPES = new Set<BlueprintBlockType>([
   'SCHEDULE',
   'SUPER',
 ]);
+
+const SCHEDULE_CONTENT_TYPES: BlueprintBlockType[] = [
+  'MOVIE', 'MUSIC', 'CARTOON', 'PROMO', 'INTRO', 'STATION_ID', 'SUPER',
+];
+
+function timeToMinutes(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+  const [hours, minutes] = value.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+function localMinutesAt(at: number, timezone: string): number {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(at));
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0);
+    const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0);
+    return hour * 60 + minute;
+  } catch {
+    const date = new Date(at);
+    return date.getHours() * 60 + date.getMinutes();
+  }
+}
+
+function scheduleRule(block: BlueprintBlock): BlueprintScheduleRule | null {
+  if (block.type !== 'SCHEDULE') return null;
+  const rule = block.config.scheduleRules;
+  const start = timeToMinutes(rule?.startTime);
+  const end = timeToMinutes(rule?.endTime);
+  if (!rule || rule.enabled === false || start == null || end == null) return null;
+  return rule;
+}
+
+function isScheduleActive(block: BlueprintBlock, at: number): boolean {
+  const rule = scheduleRule(block);
+  if (!rule) return false;
+  const start = timeToMinutes(rule.startTime)!;
+  const end = timeToMinutes(rule.endTime)!;
+  if (start === end) return true;
+  const now = localMinutesAt(at, rule.timezone || 'Asia/Baghdad');
+  return start <= end ? now >= start && now <= end : now >= start || now <= end;
+}
+
+function hasExclusiveScheduleActive(blocks: BlueprintBlock[], at: number): boolean {
+  return blocks.some((block) => block.type === 'SCHEDULE' && isScheduleActive(block, at) && block.config.scheduleRules?.exclusive !== false);
+}
+
+function schedulePlaybackBlock(block: BlueprintBlock): BlueprintBlock {
+  const contentType = block.config.scheduleRules?.contentType;
+  if (!contentType || !SCHEDULE_CONTENT_TYPES.includes(contentType)) return block;
+  return { ...block, type: contentType };
+}
 
 function blockLabel(block: BlueprintBlock): string {
   return block.label || block.type.replace(/_/g, ' ');
@@ -352,6 +409,13 @@ class BlueprintEngineService {
       const label = blockLabel(block);
       const playlistId = block.config.playlistId;
 
+      if (block.type === 'SCHEDULE' && !scheduleRule(block)) {
+        warnings.push(
+          warn('EMPTY_BLOCK', `${label} needs a valid daily start and end time`, 'Set a time window such as 18:00 to 23:59 in Schedule block settings.', block.id, 'critical')
+        );
+        continue;
+      }
+
       if (!playlistId) {
         warnings.push(
           warn('MISSING_PLAYLIST', `${label} has no playlist`, 'Open block settings and choose a content playlist.', block.id, 'critical')
@@ -472,6 +536,16 @@ class BlueprintEngineService {
         continue;
       }
 
+      const exclusiveScheduleActive = hasExclusiveScheduleActive(blocks, timeCursor);
+      if (block.type === 'SCHEDULE' && !isScheduleActive(block, timeCursor)) {
+        state.blockIndex = (state.blockIndex + 1) % blocks.length;
+        continue;
+      }
+      if (exclusiveScheduleActive && block.type !== 'SCHEDULE') {
+        state.blockIndex = (state.blockIndex + 1) % blocks.length;
+        continue;
+      }
+
       if (shouldSkipForTransition(block, state.blockIndex, blocks, state)) {
         state.blockIndex = (state.blockIndex + 1) % blocks.length;
         continue;
@@ -485,12 +559,13 @@ class BlueprintEngineService {
         continue;
       }
 
-      const visitItems = itemsForBlockVisit(block, playlist, state, rng);
+      const playbackBlock = schedulePlaybackBlock(block);
+      const visitItems = itemsForBlockVisit(playbackBlock, playlist, state, rng);
       for (const item of visitItems) {
         if (segments.length >= count) break;
         const pushed = pushResolvedSegment(
           segments,
-          block,
+          playbackBlock,
           playlist,
           item,
           state,

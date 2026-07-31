@@ -86,6 +86,7 @@ const PREWARM_WAIT_MS = 15_000;
 const LIVE_OUTPUT_STALL_MS = 45_000;
 const LIVE_OUTPUT_WATCHDOG_MS = 15_000;
 const LIVE_CONTENT_FAILURE_LIMIT = 3;
+const BLACK_RECOVERY_MAX_SEGMENT_BYTES = 180_000;
 
 class HybridOutputService {
   private processes = new Map<string, HybridProcessEntry>();
@@ -489,6 +490,20 @@ class HybridOutputService {
 
       if (result.status === 'healthy' || result.status === 'missing') {
         this.liveContentFailures.set(channelId, 0);
+        return;
+      }
+
+      // External live feeds often contain intentional fades and dark shots.
+      // A blackdetect hit alone must never tear down the on-air output.
+      if (
+        result.status === 'black' &&
+        (result.segmentSize == null || result.segmentSize > BLACK_RECOVERY_MAX_SEGMENT_BYTES)
+      ) {
+        this.liveContentFailures.set(channelId, 0);
+        logger.info(
+          `[HYBRID_CONTENT_WATCHDOG] channel=${slug} dark-program-segment ignored ` +
+            `size=${result.segmentSize ?? 0} blackDuration=${result.blackDuration.toFixed(2)}`
+        );
         return;
       }
 

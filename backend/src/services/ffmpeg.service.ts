@@ -25,7 +25,11 @@ const ONLINE_CONFIRM_RETRY_MS = 5_000;
 const MAX_BACKOFF_MS = 60_000;
 const KILL_GRACE_MS = 5_000;
 const CONTENT_PROBE_INTERVAL_MS = 30_000;
-const CONTENT_FAILURE_LIMIT = 2;
+const CONTENT_FAILURE_LIMIT = 3;
+// A dark movie scene can still be several hundred KB at 720p. A six-second
+// all-black H.264 segment is normally tiny (about 40 KB), so only that
+// combination is allowed to request a recovery.
+const BLACK_RECOVERY_MAX_SEGMENT_BYTES = 180_000;
 
 /** HLS tuning — longer segments + deeper playlist = fewer VLC micro-stalls */
 const HLS_SEGMENT_SECONDS = 6;
@@ -42,6 +46,58 @@ class FfmpegService {
     string,
     { lastProbeAt: number; lastSegment: string | null; failures: number; probing: boolean }
   >();
+
+  /**
+   * A backend restart or interrupted handoff can leave an orphan FFmpeg
+   * process writing the same HLS directory as the next encoder. Two writers
+   * corrupt the manifest and commonly look like a black channel to viewers.
+   * Sweep only FFmpeg processes whose command targets this exact channel's
+   * output folder; never touch other channels or the MCR slate.
+   */
+  private async clearStaleChannelEncoders(channelId: string, slug: string): Promise<void> {
+    if (process.platform !== 'linux') return;
+
+    const outputPrefix = `${this.getHlsOutputPath(slug)}${path.sep}`;
+    const managedPid = this.processes.get(channelId)?.pid;
+    const stalePids: number[] = [];
+
+    try {
+      for (const entry of fs.readdirSync('/proc')) {
+        if (!/^\d+$/.test(entry)) continue;
+        const pid = Number(entry);
+        if (!Number.isSafeInteger(pid) || pid === process.pid || pid === managedPid) continue;
+
+        let command = '';
+        try {
+          command = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+        } catch {
+          continue;
+        }
+
+        if (!command.includes('ffmpeg') || !command.includes(outputPrefix)) continue;
+        stalePids.push(pid);
+      }
+    } catch (error) {
+      logger.warn(`[ENCODER_GUARD] unable to scan stale encoders channel=${slug}:`, error);
+      return;
+    }
+
+    if (stalePids.length === 0) return;
+
+    logger.warn(`[ENCODER_GUARD] terminating stale encoder(s) channel=${slug} pids=${stalePids.join(',')}`);
+    monitorService.addLog(channelId, 'WARN', `Recovered stale encoder ownership for ${slug}; starting one clean program encoder.`);
+
+    for (const pid of stalePids) {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+    await sleep(800);
+    for (const pid of stalePids) {
+      try {
+        process.kill(pid, 0);
+        process.kill(pid, 'SIGKILL');
+      } catch { /* exited cleanly */ }
+    }
+  }
 
   // ─── Watchdog ─────────────────────────────────────────────
 
@@ -144,6 +200,21 @@ class FfmpegService {
         return;
       }
 
+      // Do not restart a healthy channel because a movie contains a dark
+      // scene. Only a sustained, nearly-black *and tiny* HLS segment is a
+      // reliable all-black canvas signal. Decode errors continue to recover.
+      if (
+        result.status === 'black' &&
+        (result.segmentSize == null || result.segmentSize > BLACK_RECOVERY_MAX_SEGMENT_BYTES)
+      ) {
+        state.failures = 0;
+        logger.info(
+          `[CONTENT_WATCHDOG] channel=${info.slug} dark-program-segment ignored ` +
+            `size=${result.segmentSize ?? 0} blackDuration=${result.blackDuration.toFixed(2)}`
+        );
+        return;
+      }
+
       state.failures += 1;
       logger.warn(
         `[CONTENT_WATCHDOG] channel=${info.slug} status=${result.status} ` +
@@ -202,6 +273,11 @@ class FfmpegService {
         await this.killChannelPid(channel.id);
         await sleep(1000);
       }
+
+      // Make the HLS directory single-writer before spawning a replacement.
+      // This also repairs channels that survived a backend restart as orphan
+      // FFmpeg processes.
+      await this.clearStaleChannelEncoders(channel.id, channel.slug);
 
       this.ensureOutputDir(channel.slug);
 

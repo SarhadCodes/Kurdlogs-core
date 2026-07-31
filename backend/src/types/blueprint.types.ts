@@ -12,6 +12,22 @@ export type BlueprintBlockType =
   | 'LOOP';
 
 export type BlueprintSelectionMode = 'RANDOM' | 'SEQUENTIAL';
+export type ScheduledContentType = Exclude<BlueprintBlockType, 'SCHEDULE' | 'LOOP'>;
+
+/** A daily local-time window used by a Schedule block. */
+export interface BlueprintScheduleRule {
+  enabled?: boolean;
+  /** 24-hour local time, for example "18:00". */
+  startTime?: string;
+  /** 24-hour local time, for example "23:59". Supports windows crossing midnight. */
+  endTime?: string;
+  /** Display and program category for the scheduled playlist. */
+  contentType?: ScheduledContentType;
+  /** IANA timezone used to evaluate the time window. */
+  timezone?: string;
+  /** When true, normal Blueprint blocks pause while this window is active. */
+  exclusive?: boolean;
+}
 
 /** SUPER block: play N videos or the full playlist before advancing. */
 export type SuperPlayMode = 'COUNT' | 'ALL';
@@ -35,8 +51,8 @@ export interface BlueprintBlockConfig {
   superPlayMode?: SuperPlayMode;
   /** Transition gate before this block plays (click arrow in UI) */
   transitionIn?: BlockTransitionIn;
-  /** Future: prime-time, weekly schedule, time-of-day */
-  scheduleRules?: Record<string, unknown>;
+  /** Daily time-of-day rules for SCHEDULE blocks. */
+  scheduleRules?: BlueprintScheduleRule;
   /** Future: prime-time blocks */
   primeTimeRules?: Record<string, unknown>;
   /** Future: blueprint versioning metadata */
