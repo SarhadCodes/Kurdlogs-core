@@ -16,7 +16,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { ArrowDown, GripVertical, Plus, Settings2, Trash2 } from 'lucide-react';
+import { ArrowDown, Clock3, GripVertical, Plus, Settings2, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import type { BlueprintBlock, BlueprintBlockType, BlueprintSummary, Playlist, ScheduledContentType } from '../../types';
 import { BLOCK_PALETTE, blockMeta } from './blockMeta';
@@ -322,6 +322,7 @@ export default function BlueprintCanvas({
 
   const settingsBlock = editingTransition || selected;
   const insight = settingsBlock ? playlistInsight(settingsBlock.config.playlistId, playlists, summary) : null;
+  const scheduleBlocks = blocks.filter((block) => block.type === 'SCHEDULE');
 
   return (
     <div className="flex gap-4 h-full min-h-0">
@@ -475,11 +476,54 @@ export default function BlueprintCanvas({
           <>
             <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-3">Block settings</p>
             {!selected || selected.type === 'LOOP' ? (
-              <p className="text-sm text-gray-600 leading-relaxed">
-                {selected?.type === 'LOOP'
-                  ? 'Loop returns to the first block — no settings needed.'
-                  : 'Select a block to configure its playlist, or click an arrow for transition rules.'}
-              </p>
+              selected?.type === 'LOOP' ? (
+                <p className="text-sm text-gray-600 leading-relaxed">
+                  Loop returns to the first block — no settings needed.
+                </p>
+              ) : (
+                <div className="space-y-4">
+                  <div className="rounded-xl border border-violet-400/50 bg-violet-950/30 p-3">
+                    <div className="flex items-start gap-2">
+                      <Clock3 className="mt-0.5 h-4 w-4 shrink-0 text-violet-300" />
+                      <div>
+                        <p className="text-sm font-semibold text-white">Daily movie or music time</p>
+                        <p className="mt-1 text-[11px] leading-relaxed text-violet-100/70">
+                          Set a playlist to take over from a chosen start time to end time — for example, Movies from 18:00 to 23:59.
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => onAddBlock('SCHEDULE', selectedBlockId)}
+                      className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-lg bg-violet-500 px-2.5 py-2 text-xs font-semibold text-white transition hover:bg-violet-400"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      Add time schedule
+                    </button>
+                  </div>
+
+                  {scheduleBlocks.length > 0 && (
+                    <div className="space-y-2">
+                      <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Your schedules</p>
+                      {scheduleBlocks.map((block) => (
+                        <button
+                          key={block.id}
+                          type="button"
+                          onClick={() => onSelectBlock(block.id)}
+                          className="w-full rounded-lg border border-[#333] bg-black/40 p-2.5 text-left transition hover:border-violet-400/60 hover:bg-violet-950/20"
+                        >
+                          <p className="text-xs font-semibold text-white">{block.label || 'Time schedule'}</p>
+                          <p className="mt-0.5 text-[11px] text-violet-300">{scheduleSummary(block)}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  <p className="text-[11px] leading-relaxed text-gray-600">
+                    You can also select any block to configure its playlist, or click an arrow for transition rules.
+                  </p>
+                </div>
+              )
             ) : (
               <div className="space-y-3">
                 <label className="block text-xs text-gray-400">

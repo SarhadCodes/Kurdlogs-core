@@ -14,7 +14,7 @@ export const BLOCK_PALETTE: Array<{
   { type: 'MUSIC', label: 'Music', color: 'border-pink-500/50 bg-pink-950/40', description: 'Music video block' },
   { type: 'SUPER', label: 'Super', color: 'border-orange-500/50 bg-orange-950/40', description: 'Multiple videos from one playlist' },
   { type: 'CARTOON', label: 'Cartoon', color: 'border-cyan-500/50 bg-cyan-950/40', description: 'Kids animation' },
-  { type: 'SCHEDULE', label: 'Schedule', color: 'border-gray-500/50 bg-gray-900/40', description: 'Daily timed content window' },
+  { type: 'SCHEDULE', label: 'Time schedule', color: 'border-violet-400/60 bg-violet-950/50', description: 'Movies or music at a set time' },
   { type: 'LOOP', label: 'Loop', color: 'border-white/30 bg-[#1a1a1a]', description: 'Repeat from start' },
 ];
 
