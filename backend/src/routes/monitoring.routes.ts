@@ -13,6 +13,8 @@ router.get('/boost/install.sh', asyncHandler(boostController.getBoostInstallScri
 router.use(authenticateToken);
 
 router.get('/stats', asyncHandler(monitoringController.getSystemStats));
+router.get('/storage', asyncHandler(monitoringController.getStorageStats));
+router.post('/storage/cleanup', asyncHandler(monitoringController.cleanupStorage));
 router.get('/gpu', asyncHandler(monitoringController.getGpuEncoderStatus));
 router.get('/health', asyncHandler(monitoringController.getChannelHealthAll));
 router.get('/logs', asyncHandler(monitoringController.getGlobalLogs));

@@ -28,6 +28,8 @@ class MonitorService {
   private hasGpu: boolean | null = null;
   private lastGpuUsage: number = 0;
   private prevProcCpu: Map<number, ProcCpuEntry> = new Map();
+  private lastSystemCpuPercent = 0;
+  private lastSystemCpuAt = 0;
 
   startMonitoring() {
     if (this.monitorInterval) return;
@@ -111,6 +113,8 @@ class MonitorService {
     const memPercent = ((totalMem - freeMem) / totalMem) * 100;
 
     const cpuPercent = this.measureCpu();
+    this.lastSystemCpuPercent = cpuPercent;
+    this.lastSystemCpuAt = Date.now();
 
     const stats = {
       cpu: Math.round(cpuPercent * 10) / 10,
@@ -140,6 +144,31 @@ class MonitorService {
   /** Public CPU reading for REST benchmark / monitoring endpoints. */
   getSystemCpuPercent(): number {
     return this.measureCpu();
+  }
+
+  /** Cached snapshot for dashboards so frequent REST polling cannot distort CPU sampling. */
+  getSystemSnapshot() {
+    const totalMem = os.totalmem();
+    const freeMem = os.freemem();
+    const usedMem = totalMem - freeMem;
+    const cachedCpuIsFresh = Date.now() - this.lastSystemCpuAt < 20_000;
+    const cpu = cachedCpuIsFresh ? this.lastSystemCpuPercent : this.measureCpu();
+    if (!cachedCpuIsFresh) {
+      this.lastSystemCpuPercent = cpu;
+      this.lastSystemCpuAt = Date.now();
+    }
+    return {
+      cpu: Math.round(cpu * 10) / 10,
+      ram: Math.round(((usedMem / totalMem) * 100) * 10) / 10,
+      totalMem,
+      usedMem,
+      freeMem,
+      activeChannels: ffmpegService.getAllProcesses().size,
+      uptime: os.uptime(),
+      processUptime: process.uptime(),
+      cpuCores: NUM_CPUS,
+      loadAverage: os.loadavg().map((value) => Math.round(value * 100) / 100),
+    };
   }
 
   private measureCpu(): number {
@@ -302,14 +331,18 @@ class MonitorService {
   async cleanOldData(daysToKeep = 7) {
     const threshold = new Date(Date.now() - daysToKeep * 24 * 60 * 60 * 1000);
 
-    const [statsResult, logsResult] = await Promise.all([
+    const [statsResult, logsResult, appLogsResult] = await Promise.all([
       prisma.streamStats.deleteMany({ where: { timestamp: { lt: threshold } } }),
       prisma.streamLog.deleteMany({ where: { timestamp: { lt: threshold } } }),
+      prisma.appLog.deleteMany({ where: { createdAt: { lt: threshold } } }),
     ]);
 
-    if (statsResult.count > 0 || logsResult.count > 0) {
-      logger.info(`Cleaned ${statsResult.count} old stats and ${logsResult.count} old logs.`);
+    if (statsResult.count > 0 || logsResult.count > 0 || appLogsResult.count > 0) {
+      logger.info(
+        `Cleaned ${statsResult.count} old stats, ${logsResult.count} stream logs, and ${appLogsResult.count} app logs.`
+      );
     }
+    return { stats: statsResult.count, streamLogs: logsResult.count, appLogs: appLogsResult.count };
   }
 }
 

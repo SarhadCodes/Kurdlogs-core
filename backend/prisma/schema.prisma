@@ -441,6 +441,8 @@ model StreamLog {
   level     LogLevel
   message   String
   timestamp DateTime @default(now())
+
+  @@index([timestamp])
 }
 
 model StreamStats {
@@ -455,6 +457,8 @@ model StreamStats {
   frames    Int      @default(0)
   speed     String   @default("0x")
   timestamp DateTime @default(now())
+
+  @@index([timestamp])
 }
 
 model AppLog {
@@ -464,6 +468,8 @@ model AppLog {
   message   String
   meta      Json?
   createdAt DateTime       @default(now())
+
+  @@index([createdAt])
 }
 
 /// Remote VPS worker for distributed encoding and streaming (Boost).

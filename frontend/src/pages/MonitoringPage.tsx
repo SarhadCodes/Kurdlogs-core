@@ -16,6 +16,7 @@ import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import LogViewer from '../components/LogViewer';
 import BoostPanel from '../components/BoostPanel';
+import StoragePanel from '../components/StoragePanel';
 import { SystemStats, StreamLog, ChannelHealthReport, HealthLevel } from '../types';
 import toast from 'react-hot-toast';
 
@@ -210,13 +211,13 @@ export default function MonitoringPage() {
           <BoostPanel />
         ) : (
           <>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 2xl:grid-cols-4 gap-4">
               <div className="bg-[#111111] border border-[#333333] rounded-lg p-5">
-                <div className="flex justify-between items-center mb-4">
+                <div className="flex justify-between items-center gap-3 mb-4">
                   <h3 className="text-gray-400 font-medium flex items-center gap-2">
                     <Cpu className="w-5 h-5" /> CPU Usage
                   </h3>
-                  <span className="text-2xl font-bold text-white">{stats?.cpu?.toFixed(1) || 0}%</span>
+                  <span className="shrink-0 text-2xl font-bold text-white">{stats?.cpu?.toFixed(1) || 0}%</span>
                 </div>
                 <div className="w-full bg-[#222222] rounded-full h-2">
                   <div
@@ -224,6 +225,9 @@ export default function MonitoringPage() {
                     style={{ width: `${stats?.cpu || 0}%` }}
                   />
                 </div>
+                <p className="text-xs text-gray-500 mt-3 text-right">
+                  {stats?.cpuCores ?? 0} cores · load {stats?.loadAverage?.[0]?.toFixed(2) ?? '0.00'}
+                </p>
               </div>
 
               <div className="bg-[#111111] border border-[#333333] rounded-lg p-5">
@@ -267,6 +271,8 @@ export default function MonitoringPage() {
                 </div>
               </div>
             </div>
+
+            <StoragePanel />
 
             <div className="bg-[#111111] border border-[#333333] rounded-lg overflow-hidden">
               <div className="px-5 py-4 border-b border-[#333333] bg-[#1a1a1a]">

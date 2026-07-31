@@ -148,8 +148,77 @@ export interface SystemStats {
   ram: number;
   totalMem: number;
   usedMem: number;
+  freeMem: number;
   activeChannels: number;
   uptime: number;
+  processUptime: number;
+  cpuCores: number;
+  loadAverage: number[];
+}
+
+export type StorageStatus = 'HEALTHY' | 'WARNING' | 'CRITICAL';
+export type StorageCleanupTargetId =
+  | 'stream-cache'
+  | 'failed-artifacts'
+  | 'expired-exports'
+  | 'monitoring-history';
+
+export interface StorageCategory {
+  id: string;
+  label: string;
+  color: string;
+  bytes: number;
+  fileCount: number;
+}
+
+export interface StorageCleanupTarget {
+  id: StorageCleanupTargetId;
+  label: string;
+  description: string;
+  bytes: number;
+  fileCount: number;
+  rowCount: number;
+}
+
+export interface StorageReport {
+  generatedAt: string;
+  filesystem: {
+    path: string;
+    totalBytes: number;
+    usedBytes: number;
+    freeBytes: number;
+    availableBytes: number;
+    reservedBytes: number;
+    usagePercent: number;
+    availablePercent: number;
+    status: StorageStatus;
+  };
+  application: {
+    totalBytes: number;
+    fileCount: number;
+    categories: StorageCategory[];
+    otherSystemBytes: number;
+  };
+  cleanup: {
+    reclaimableBytes: number;
+    reclaimableFiles: number;
+    targets: StorageCleanupTarget[];
+  };
+}
+
+export interface StorageCleanupResult {
+  completedAt: string;
+  deletedFiles: number;
+  freedBytes: number;
+  removedRows: number;
+  results: Array<{
+    id: StorageCleanupTargetId;
+    deletedFiles: number;
+    freedBytes: number;
+    removedRows: number;
+    errors: number;
+  }>;
+  storage: StorageReport;
 }
 
 export interface StreamLog {

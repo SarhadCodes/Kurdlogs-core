@@ -11,6 +11,9 @@ import {
   BoostNode,
   BoostSummary,
   ApiResponse,
+  StorageCleanupResult,
+  StorageCleanupTargetId,
+  StorageReport,
 } from '../types';
 import type { ChannelPlayUrlsData } from '../utils/channelOutputs';
 
@@ -219,6 +222,13 @@ export const tokenApi = {
 
 export const monitorApi = {
   getSystemStats: () => api.get<any, ApiResponse<SystemStats>>('/monitoring/stats'),
+  getStorage: (force = false) =>
+    api.get<any, ApiResponse<StorageReport>>(`/monitoring/storage${force ? '?force=true' : ''}`),
+  cleanupStorage: (targets: StorageCleanupTargetId[]) =>
+    api.post<any, ApiResponse<StorageCleanupResult>>('/monitoring/storage/cleanup', {
+      targets,
+      confirm: 'CLEAR_STORAGE',
+    }),
   getChannelHealth: () => api.get<any, ApiResponse<import('../types').ChannelHealthReport[]>>('/monitoring/health'),
   getLogs: (limit: number = 50) => api.get<any, ApiResponse<StreamLog[]>>(`/monitoring/logs?limit=${limit}`),
   getAppLogs: (limit = 100, category?: string) => {
