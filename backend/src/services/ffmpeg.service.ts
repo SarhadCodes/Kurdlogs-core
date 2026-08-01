@@ -236,6 +236,18 @@ class FfmpegService {
             ? 'Content watchdog detected sustained black video. Recovering channel...'
             : 'Content watchdog could not decode the published video. Recovering channel...'
       );
+      // A Blueprint encoder reads its concat window as one continuous program.
+      // Once the bad item has been quarantined, killing that encoder creates a
+      // visible HLS discontinuity for every viewer, while leaving it running
+      // lets FFmpeg move to the next entry naturally. The regenerated window
+      // excludes the item on its next roll, so it cannot return to air.
+      if (quarantined) {
+        logger.warn(
+          `[CONTENT_WATCHDOG] channel=${info.slug} quarantined media without encoder restart; ` +
+            'preserving the on-air HLS timeline'
+        );
+        return;
+      }
       await this.forceKill(channelId);
     } catch (error) {
       logger.warn(`[CONTENT_WATCHDOG] probe failed channel=${info.slug}:`, error);
