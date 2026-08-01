@@ -15,6 +15,7 @@ import {
   type PlaybackTimeSource,
 } from './playbackClock.service';
 import { playbackSyncService } from './playbackSync.service';
+import { monitorService } from './monitor.service';
 
 export interface BlueprintWindowSegment extends ResolvedSegment {
   videoPath?: string;
@@ -875,6 +876,26 @@ class BlueprintPlaybackService {
     const filePath = this.getBlueprintConcatPath(channelId);
     if (!build) {
       logger.error(`[EXECUTION_ERROR] blockType=window media=none error=No segments generated channelId=${channelId}`);
+      // Never remove a concat file which is still being consumed by the live
+      // encoder. This used to create a race where FFmpeg was healthy until a
+      // schedule became temporarily empty, then died with "No such file".
+      // Preserve the last verified window and let the next scheduled rebuild
+      // replace it atomically instead of taking the channel off air.
+      const activeRuntime = prev ?? this.runtimes.get(channelId);
+      const persistedSegmentCount = persisted?.windowSegments?.length ?? 0;
+      const activeSegmentCount = activeRuntime?.segments.length ?? persistedSegmentCount;
+      if (activeSegmentCount > 0 && fs.existsSync(filePath)) {
+        monitorService.addLog(
+          channelId,
+          'WARN',
+          'Schedule produced no new playable window; keeping the current on-air window until content is available.'
+        );
+        logger.warn(
+          `[WINDOW_PRESERVE] channelId=${channelId} reason=no_new_playable_segments ` +
+            `activeSegments=${activeSegmentCount}`
+        );
+        return filePath;
+      }
       this.runtimes.delete(channelId);
       this.clearPersistedState(channelId);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -955,8 +976,11 @@ class BlueprintPlaybackService {
 
     const playlistIds = blueprintService
       .parseBlocksFromJson(channel.blueprint.blocks)
-      .map((b) => b.config?.playlistId)
-      .filter(Boolean) as string[];
+      .flatMap((block) => [
+        block.config?.playlistId,
+        ...(block.config?.scheduleRules?.playlists?.map((entry) => entry.playlistId) ?? []),
+      ])
+      .filter((id): id is string => !!id);
 
     this.savePersistedState(channelId, {
       blueprintId: channel.blueprint.id,
