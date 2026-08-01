@@ -18,7 +18,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { ArrowDown, Clock3, GripVertical, Plus, Settings2, Trash2 } from 'lucide-react';
 import { useState } from 'react';
-import type { BlueprintBlock, BlueprintBlockType, BlueprintSummary, Playlist, ScheduledContentType } from '../../types';
+import type { BlueprintBlock, BlueprintBlockType, BlueprintSchedulePlaylist, BlueprintSummary, Playlist, ScheduledContentType } from '../../types';
 import { BLOCK_PALETTE, blockMeta } from './blockMeta';
 import { defaultTransitionAfter, transitionLabel } from './transitionUtils';
 
@@ -47,7 +47,8 @@ function scheduleSummary(block: BlueprintBlock): string | null {
   const rule = block.config.scheduleRules;
   if (!rule?.startTime || !rule?.endTime) return 'Configure daily time window';
   const kind = (rule.contentType || 'MOVIE').toLowerCase();
-  return `${rule.startTime}–${rule.endTime} • ${kind}`;
+  const rotations = rule.playlists?.filter((entry) => entry.playlistId).length ?? 0;
+  return `${rule.startTime}–${rule.endTime} • ${rotations > 1 ? `${rotations} playlist rotation` : kind}`;
 }
 
 function playlistInsight(
@@ -544,8 +545,8 @@ export default function BlueprintCanvas({
                     onChange={(e) => updateSelected({ label: e.target.value })}
                   />
                 </label>
-                <label className="block text-xs text-gray-400">
-                  {selected.type === 'SCHEDULE' ? 'Scheduled content playlist' : 'Playlist'}
+                {selected.type !== 'SCHEDULE' && <label className="block text-xs text-gray-400">
+                  Playlist
                   <select
                     className="mt-1 w-full bg-black border border-[#333] rounded-lg px-2 py-2 text-sm text-white"
                     value={selected.config.playlistId || ''}
@@ -558,7 +559,7 @@ export default function BlueprintCanvas({
                       </option>
                     ))}
                   </select>
-                </label>
+                </label>}
 
                 {insight && (
                   <div className="rounded-lg border border-[#2a2a2a] bg-black/40 p-3 space-y-1">
@@ -640,24 +641,60 @@ export default function BlueprintCanvas({
                     <div>
                       <p className="text-xs font-semibold text-white">Daily schedule window</p>
                       <p className="mt-1 text-[11px] leading-relaxed text-gray-500">
-                        This playlist takes over while the window is active. A video already playing is allowed to finish before the next scheduled item starts.
+                        Rotate any number of playlists while this window is active. Each row plays its chosen number of videos, then moves to the next row.
                       </p>
                     </div>
-                    <label className="block text-xs text-gray-400">
-                      Content type
-                      <select
-                        className="mt-1 w-full bg-black border border-[#333] rounded-lg px-2 py-2 text-sm text-white"
-                        value={selected.config.scheduleRules?.contentType || 'MOVIE'}
-                        onChange={(e) => updateSelected({ scheduleRules: { ...selected.config.scheduleRules, contentType: e.target.value as ScheduledContentType } })}
-                      >
-                        <option value="MOVIE">Movies</option>
-                        <option value="MUSIC">Music</option>
-                        <option value="CARTOON">Cartoons</option>
-                        <option value="PROMO">Promos</option>
-                        <option value="INTRO">Intros</option>
-                        <option value="STATION_ID">Station IDs</option>
-                      </select>
-                    </label>
+                    <div className="space-y-2 rounded-md border border-violet-500/25 bg-black/30 p-2.5">
+                      <div className="flex items-center justify-between gap-2">
+                        <div>
+                          <p className="text-xs font-medium text-white">Playlist rotation</p>
+                          <p className="text-[10px] text-gray-500">Order is top to bottom and repeats for the full window.</p>
+                        </div>
+                        <button
+                          type="button"
+                          className="rounded-md border border-violet-500/50 px-2 py-1 text-[11px] font-medium text-violet-200 hover:bg-violet-500/10"
+                          onClick={() => {
+                            const current = selected.config.scheduleRules?.playlists ?? (selected.config.playlistId ? [{ playlistId: selected.config.playlistId, videosPerTurn: 1, contentType: selected.config.scheduleRules?.contentType || 'MOVIE' }] : []);
+                            const next: BlueprintSchedulePlaylist = { playlistId: playlists[0]?.id || '', videosPerTurn: 1, contentType: 'MOVIE' };
+                            updateSelected({ playlistId: undefined, scheduleRules: { ...selected.config.scheduleRules, enabled: true, playlists: [...current, next] } });
+                          }}
+                        >
+                          + Add playlist
+                        </button>
+                      </div>
+                      {(selected.config.scheduleRules?.playlists ?? (selected.config.playlistId ? [{ playlistId: selected.config.playlistId, videosPerTurn: 1, contentType: selected.config.scheduleRules?.contentType || 'MOVIE' }] : [])).map((entry, index, entries) => (
+                        <div key={`${entry.playlistId}-${index}`} className="rounded-md border border-[#292929] bg-[#101010] p-2 space-y-2">
+                          <div className="flex items-center justify-between text-[11px]">
+                            <span className="font-medium text-violet-200">{index + 1}. Then play</span>
+                            <button
+                              type="button"
+                              disabled={entries.length === 1}
+                              className="text-gray-500 hover:text-red-400 disabled:opacity-30"
+                              onClick={() => updateSelected({ playlistId: undefined, scheduleRules: { ...selected.config.scheduleRules, playlists: entries.filter((_, entryIndex) => entryIndex !== index) } })}
+                            >Remove</button>
+                          </div>
+                          <select
+                            className="w-full bg-black border border-[#333] rounded-md px-2 py-1.5 text-xs text-white"
+                            value={entry.playlistId}
+                            onChange={(e) => updateSelected({ playlistId: undefined, scheduleRules: { ...selected.config.scheduleRules, playlists: entries.map((item, entryIndex) => entryIndex === index ? { ...item, playlistId: e.target.value } : item) } })}
+                          >
+                            <option value="">Choose playlist…</option>
+                            {playlists.map((playlist) => <option key={playlist.id} value={playlist.id}>{playlist.name}</option>)}
+                          </select>
+                          <div className="grid grid-cols-2 gap-2">
+                            <label className="block text-[11px] text-gray-400">Videos before next
+                              <input type="number" min={1} max={99} className="mt-1 w-full bg-black border border-[#333] rounded-md px-2 py-1.5 text-xs text-white" value={entry.videosPerTurn ?? 1} onChange={(e) => updateSelected({ playlistId: undefined, scheduleRules: { ...selected.config.scheduleRules, playlists: entries.map((item, entryIndex) => entryIndex === index ? { ...item, videosPerTurn: Math.max(1, Math.min(99, parseInt(e.target.value, 10) || 1)) } : item) } })} />
+                            </label>
+                            <label className="block text-[11px] text-gray-400">Program type
+                              <select className="mt-1 w-full bg-black border border-[#333] rounded-md px-2 py-1.5 text-xs text-white" value={entry.contentType || selected.config.scheduleRules?.contentType || 'MOVIE'} onChange={(e) => updateSelected({ playlistId: undefined, scheduleRules: { ...selected.config.scheduleRules, playlists: entries.map((item, entryIndex) => entryIndex === index ? { ...item, contentType: e.target.value as ScheduledContentType } : item) } })}>
+                                <option value="MOVIE">Movies</option><option value="MUSIC">Music</option><option value="CARTOON">Cartoons</option><option value="PROMO">Promos</option><option value="INTRO">Intros</option><option value="STATION_ID">Station IDs</option>
+                              </select>
+                            </label>
+                          </div>
+                        </div>
+                      ))}
+                      {(selected.config.scheduleRules?.playlists?.length ?? 0) === 0 && !selected.config.playlistId && <p className="text-[11px] text-amber-300">Add at least one playlist to make this schedule playable.</p>}
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
                       <label className="block text-xs text-gray-400">
                         Start time

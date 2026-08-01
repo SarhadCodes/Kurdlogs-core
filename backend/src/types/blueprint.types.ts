@@ -14,6 +14,15 @@ export type BlueprintBlockType =
 export type BlueprintSelectionMode = 'RANDOM' | 'SEQUENTIAL';
 export type ScheduledContentType = Exclude<BlueprintBlockType, 'SCHEDULE' | 'LOOP'>;
 
+/** One ordered stop in a timed schedule rotation. */
+export interface BlueprintSchedulePlaylist {
+  playlistId: string;
+  /** Number of clips to play before advancing to the next playlist. */
+  videosPerTurn?: number;
+  /** Optional category shown in the program guide for this playlist. */
+  contentType?: ScheduledContentType;
+}
+
 /** A daily local-time window used by a Schedule block. */
 export interface BlueprintScheduleRule {
   enabled?: boolean;
@@ -27,6 +36,8 @@ export interface BlueprintScheduleRule {
   timezone?: string;
   /** When true, normal Blueprint blocks pause while this window is active. */
   exclusive?: boolean;
+  /** Ordered playlist rotation. Legacy schedule blocks continue to use config.playlistId. */
+  playlists?: BlueprintSchedulePlaylist[];
 }
 
 /** SUPER block: play N videos or the full playlist before advancing. */
@@ -228,6 +239,8 @@ export interface BlueprintRuntimeState {
   rngCounter?: number;
   /** Global play count per blockId+itemId for timeline segment identity */
   occurrenceCounters?: Record<string, number>;
+  /** Current playlist position for each timed Schedule block. */
+  scheduleRotationCursors?: Record<string, number>;
 }
 
 export interface PlaylistInsight {

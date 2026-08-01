@@ -91,9 +91,12 @@ class BlueprintService {
   }
 
   private extractPlaylistIds(blocks: BlueprintBlock[]): string[] {
-    return blocks
-      .map((b) => b.config?.playlistId)
-      .filter((id): id is string => !!id);
+    return blocks.flatMap((block) => {
+      const rotationIds = block.config?.scheduleRules?.playlists
+        ?.map((entry) => entry.playlistId)
+        .filter(Boolean) ?? [];
+      return [block.config?.playlistId, ...rotationIds].filter((id): id is string => !!id);
+    });
   }
 
   private parseBlocks(raw: unknown): BlueprintBlock[] {

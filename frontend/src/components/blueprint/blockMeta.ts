@@ -40,6 +40,7 @@ export function newBlock(type: BlueprintBlockType, label?: string) {
               contentType: 'MOVIE' as const,
               timezone: 'Asia/Baghdad',
               exclusive: true,
+              playlists: [],
             },
           }
         : {}),

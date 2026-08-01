@@ -378,6 +378,12 @@ export type BlueprintBlockType =
 export type SuperPlayMode = 'COUNT' | 'ALL';
 export type ScheduledContentType = Exclude<BlueprintBlockType, 'SCHEDULE' | 'LOOP'>;
 
+export interface BlueprintSchedulePlaylist {
+  playlistId: string;
+  videosPerTurn?: number;
+  contentType?: ScheduledContentType;
+}
+
 export interface BlueprintScheduleRule {
   enabled?: boolean;
   startTime?: string;
@@ -385,6 +391,7 @@ export interface BlueprintScheduleRule {
   contentType?: ScheduledContentType;
   timezone?: string;
   exclusive?: boolean;
+  playlists?: BlueprintSchedulePlaylist[];
 }
 
 export interface BlueprintBlock {
