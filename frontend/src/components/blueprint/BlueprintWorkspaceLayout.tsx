@@ -118,7 +118,7 @@ export default function BlueprintWorkspaceLayout({
   const showSummary = !expandCanvas && editorTab === 'design' && summaryPanel;
 
   return (
-    <div className="flex flex-col flex-1 min-h-0 gap-2">
+    <div className="flex flex-col flex-1 min-h-0 gap-2 blueprint-workspace">
       <div className="flex items-center gap-2 shrink-0 flex-wrap">
         {headerExtra}
         {editorTab === 'design' && (
@@ -137,7 +137,7 @@ export default function BlueprintWorkspaceLayout({
         )}
       </div>
 
-      <div className="flex gap-4 flex-1 min-h-0">
+      <div className="flex flex-col xl:flex-row gap-4 flex-1 min-h-0">
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">{canvasArea}</div>
         {showSummary && <div className="w-56 shrink-0 hidden xl:block">{summaryPanel}</div>}
       </div>
@@ -150,13 +150,13 @@ export default function BlueprintWorkspaceLayout({
             role="separator"
             aria-orientation="horizontal"
             onMouseDown={onResizeStart}
-            className="h-2 shrink-0 cursor-row-resize group flex items-center justify-center"
+            className="h-2 shrink-0 cursor-row-resize group flex items-center justify-center blueprint-resize-handle"
           >
             <div className="w-16 h-1 rounded-full bg-[#333] group-hover:bg-violet-500/60 transition" />
           </div>
 
           <div
-            className="shrink-0 grid grid-cols-1 lg:grid-cols-2 gap-3 min-h-0 overflow-hidden"
+            className="blueprint-workspace-bottom shrink-0 grid grid-cols-1 lg:grid-cols-2 gap-3 min-h-0 overflow-hidden"
             style={{ height: simulatorCollapsed && publishCollapsed ? 'auto' : bottomPanelHeight }}
           >
             <CollapsibleSection

@@ -413,7 +413,7 @@ export default function BlueprintsPage() {
 
   return (
     <Layout>
-      <div className="space-y-4 h-[calc(100dvh-7rem)] flex flex-col min-h-0">
+      <div className="space-y-4 md:h-[calc(100dvh-7rem)] flex flex-col min-h-0">
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 shrink-0">
           <div>
             <h1 className="text-xl sm:text-2xl font-bold text-white flex items-center gap-2">
@@ -442,9 +442,9 @@ export default function BlueprintsPage() {
           )}
         </div>
 
-        <div className="flex gap-4 flex-1 min-h-0">
-          <div className="w-52 shrink-0 border border-[#333] rounded-xl bg-[#111] flex flex-col overflow-hidden">
-            <div className="p-3 border-b border-[#333] max-h-[45%] overflow-y-auto">
+        <div className="flex flex-col lg:flex-row gap-4 flex-1 min-h-0">
+          <div className="w-full lg:w-52 shrink-0 border border-[#333] rounded-xl bg-[#111] flex flex-col lg:max-h-none max-h-80 overflow-hidden">
+            <div className="p-3 border-b border-[#333] lg:max-h-[45%] overflow-y-auto">
               <p className="text-xs text-gray-500 mb-2 font-medium">Templates</p>
               <div className="space-y-1">
                 {templates.map((t) => (
@@ -460,7 +460,7 @@ export default function BlueprintsPage() {
                 ))}
               </div>
             </div>
-            <div className="flex-1 overflow-y-auto p-2 space-y-1">
+            <div className="flex-1 overflow-y-auto p-2 space-y-1 min-h-24">
               {blueprints.map((bp) => (
                 <div
                   key={bp.id}

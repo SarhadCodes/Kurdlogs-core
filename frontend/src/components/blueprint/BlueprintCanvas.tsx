@@ -326,8 +326,8 @@ export default function BlueprintCanvas({
   const scheduleBlocks = blocks.filter((block) => block.type === 'SCHEDULE');
 
   return (
-    <div className="flex gap-4 h-full min-h-0">
-      <div className="w-44 shrink-0 overflow-y-auto pr-1 space-y-1.5">
+    <div className="flex flex-col lg:flex-row gap-3 lg:gap-4 h-auto lg:h-full min-h-0">
+      <div className="w-full lg:w-44 shrink-0 overflow-x-auto lg:overflow-y-auto pr-1 space-y-1.5 blueprint-block-palette">
         <p className="text-xs font-medium text-gray-500 uppercase tracking-wide mb-1 px-1">Blocks</p>
         <p className="text-[10px] text-gray-600 px-1 mb-2 leading-snug">
           Click to add{selectedBlockId ? ' after selection' : ' before Loop'}.
@@ -354,7 +354,7 @@ export default function BlueprintCanvas({
         ))}
       </div>
 
-      <div className="flex-1 min-w-0 overflow-y-auto bg-[#080808] border border-[#333] rounded-xl p-8 blueprint-canvas-grid">
+      <div className="flex-1 min-w-0 min-h-[430px] lg:min-h-0 overflow-y-auto bg-[#080808] border border-[#333] rounded-xl p-3 sm:p-5 lg:p-8 blueprint-canvas-grid">
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -420,7 +420,7 @@ export default function BlueprintCanvas({
         </DndContext>
       </div>
 
-      <div className="w-64 shrink-0 border border-[#333] rounded-xl p-4 bg-[#111] overflow-y-auto">
+      <div className="w-full lg:w-64 shrink-0 border border-[#333] rounded-xl p-4 bg-[#111] overflow-y-auto max-h-none lg:max-h-full">
         {editingTransition ? (
           <>
             <p className="text-xs font-medium text-violet-400 uppercase tracking-wide mb-1">Transition</p>
