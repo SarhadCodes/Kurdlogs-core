@@ -705,7 +705,13 @@ class BlueprintPlaybackService {
     if (!channel?.useBlueprint || !channel.blueprint) return null;
 
     const blocks = blueprintService.parseBlocksFromJson(channel.blueprint.blocks);
-    const playlistIds = blocks.map((b) => b.config?.playlistId).filter(Boolean) as string[];
+    // A timed Schedule block can rotate several playlists. Load every source
+    // here, not only the legacy top-level config.playlistId, otherwise the
+    // execution engine receives an empty pool and cannot build its concat.
+    const playlistIds = blocks.flatMap((block) => [
+      block.config?.playlistId,
+      ...(block.config?.scheduleRules?.playlists?.map((entry) => entry.playlistId) ?? []),
+    ]).filter((id): id is string => !!id);
     const playlists = await blueprintService.loadPlaylistSources(playlistIds);
 
     const persisted = this.loadPersistedState(channelId);
