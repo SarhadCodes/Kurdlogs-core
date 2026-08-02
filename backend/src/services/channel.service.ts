@@ -1,3 +1,4 @@
+import fs from 'fs';
 import { prisma } from '../config/database';
 import { buildMcrInternalIngestUrl } from '../config/mcrRtmp';
 import { generateSlug } from '../utils/helpers';
@@ -169,7 +170,15 @@ class ChannelService {
           });
         }
         const { blueprintPlaybackService } = await import('./blueprintPlayback.service');
-        const windowPath = await blueprintPlaybackService.refreshChannelWindow(id);
+        // A just-published blueprint already has an in-memory, validated
+        // concat window. Do not regenerate it on Start: a normal refresh uses
+        // the rolling cursor and can replace an active exclusive time schedule
+        // before FFmpeg receives the published window.
+        const publishedRuntime = blueprintPlaybackService.getRuntime(id);
+        const publishedConcat = blueprintPlaybackService.getBlueprintConcatPath(id);
+        const windowPath = publishedRuntime?.segments.length && fs.existsSync(publishedConcat)
+          ? publishedConcat
+          : await blueprintPlaybackService.refreshChannelWindow(id);
         if (!windowPath) {
           throw new AppError(
             'Cannot start — blueprint blocks need playlists with READY videos. Open Blueprint and assign content to each block.',
