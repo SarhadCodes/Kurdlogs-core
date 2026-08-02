@@ -718,7 +718,13 @@ class BlueprintPlaybackService {
 
     const persisted = this.loadPersistedState(channelId);
     const prev = this.runtimes.get(channelId);
+    // A publish can keep the same blueprint ID while replacing its blocks.
+    // Treat that explicit operation as a new schedule: otherwise a running
+    // channel continues building from the old, far-future window cursor and
+    // timed content (for example 20:00–03:00 movies) is skipped until the
+    // stale window eventually rolls over.
     const blueprintChanged =
+      options?.reason === 'blueprint_changed' ||
       (prev && prev.blueprintId !== channel.blueprint.id) ||
       (persisted && persisted.blueprintId !== channel.blueprint.id);
 
@@ -904,6 +910,7 @@ class BlueprintPlaybackService {
     }
 
     const blueprintChanged =
+      options?.reason === 'blueprint_changed' ||
       (prev && prev.blueprintId !== channel.blueprint.id) ||
       (persisted && persisted.blueprintId !== channel.blueprint.id);
 

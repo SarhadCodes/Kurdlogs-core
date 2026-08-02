@@ -1061,7 +1061,13 @@ class BlueprintService {
     });
 
     const { blueprintPlaybackService } = await import('./blueprintPlayback.service');
-    const concatPath = await blueprintPlaybackService.refreshChannelWindow(channelId);
+    // Publishing changes the definition of the schedule even when the
+    // blueprint record keeps its ID.  Reset the live window anchor so an
+    // active time window takes effect immediately instead of inheriting an
+    // old future cursor.
+    const concatPath = await blueprintPlaybackService.refreshChannelWindow(channelId, {
+      reason: 'blueprint_changed',
+    });
     this.invalidateTimelineCaches(blueprintId, 'BLUEPRINT_REPUBLISH');
 
     if (!concatPath || !fs.existsSync(concatPath)) {
