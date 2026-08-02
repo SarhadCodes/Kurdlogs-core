@@ -905,7 +905,17 @@ class FfmpegService {
     if (await this.shouldUseBlueprintPlayback(channel)) {
       const { blueprintPlaybackService } = await import('./blueprintPlayback.service');
       const { blueprintWindowAuditService } = await import('./blueprintWindowAudit.service');
-      const refreshed = await blueprintPlaybackService.refreshChannelWindow(channel.id);
+      // A blueprint publish prebuilds and validates its replacement window before
+      // requesting this controlled encoder handoff.  Rebuilding it here used the
+      // ordinary window-roll cursor and could immediately overwrite an active
+      // timed schedule (for example, 20:00–03:00 movies) with the old trailer
+      // sequence. Reuse that already-published window; a cold start still builds
+      // one normally because no in-memory runtime exists.
+      const publishedRuntime = blueprintPlaybackService.getRuntime(channel.id);
+      const publishedConcat = blueprintPlaybackService.getBlueprintConcatPath(channel.id);
+      const refreshed = publishedRuntime?.segments.length && fs.existsSync(publishedConcat)
+        ? publishedConcat
+        : await blueprintPlaybackService.refreshChannelWindow(channel.id);
       if (!refreshed) {
         const msg =
           'Blueprint has no ready videos — open Blueprint, assign a playlist to every block, and ensure items are READY.';
