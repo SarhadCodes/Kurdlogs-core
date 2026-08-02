@@ -32,7 +32,7 @@ function hlsProfileSettings(profile: HybridHlsProfile): {
       listSize: HYBRID_LIVE_LIST_SIZE,
       gop: HYBRID_LIVE_GOP_FRAMES,
       deleteThreshold: 2,
-      preset: 'veryfast',
+      preset: 'ultrafast',
       tune: 'zerolatency',
     };
   }
@@ -42,7 +42,7 @@ function hlsProfileSettings(profile: HybridHlsProfile): {
       listSize: HYBRID_STATION_LIST_SIZE,
       gop: HYBRID_STATION_GOP_FRAMES,
       deleteThreshold: 4,
-      preset: 'veryfast',
+      preset: 'ultrafast',
     };
   }
   return {
@@ -50,7 +50,7 @@ function hlsProfileSettings(profile: HybridHlsProfile): {
     listSize: HYBRID_HLS_LIST_SIZE,
     gop: HYBRID_HLS_GOP_FRAMES,
     deleteThreshold: 30,
-    preset: 'veryfast',
+    preset: 'ultrafast',
   };
 }
 

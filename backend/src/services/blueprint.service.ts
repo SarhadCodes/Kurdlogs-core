@@ -518,20 +518,8 @@ class BlueprintService {
         void this.regenerateTimelineCacheForChannel(blueprintId, channelId);
       }
 
-      const wallNow = cursor.now;
-      const rawStartsAt = timelineSegment?.startsAt ?? windowSeg.startsAt;
-      const rawDate = new Date(rawStartsAt);
-      const displayOffsetMs = Date.parse(wallNow) - rawDate.getTime();
-      logger.info(
-        `[TIME_DEBUG] channelId=${channelId} rawStartsAt=${rawStartsAt} ` +
-          `utcStartsAt=${rawDate.toISOString()} ` +
-          `localStartsAt=${rawDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} ` +
-          `displayedTime=${new Date(rawDate.getTime() + displayOffsetMs).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} ` +
-          `timezoneOffsetMinutes=${-new Date().getTimezoneOffset()} ` +
-          `displayOffsetMs=${displayOffsetMs} ` +
-          `scheduleAnchorMs=${runtime.scheduleAnchorMs} ` +
-          `windowScheduleStartMs=${runtime.windowScheduleStartMs} wallNow=${wallNow}`
-      );
+      // Timing values are returned to the caller below. Do not emit this
+      // high-cardinality diagnostic on every cursor poll in production.
     }
 
     const currentMedia = cursor.current?.title ?? null;

@@ -14,7 +14,6 @@ import {
   logPlaybackTimeSource,
   type PlaybackTimeSource,
 } from './playbackClock.service';
-import { playbackSyncService } from './playbackSync.service';
 import { monitorService } from './monitor.service';
 
 export interface BlueprintWindowSegment extends ResolvedSegment {
@@ -273,7 +272,9 @@ class BlueprintPlaybackService {
       rt.updatedAt = Date.now();
       this.logWindowReset(channelId, rt, 'stream_started');
       blueprintService.invalidateTimelineCaches(rt.blueprintId, 'CHANNEL_RESTART');
-      playbackSyncService.startMonitoring(channelId, rt.blueprintId);
+      // Playback diagnostics are requested on demand by the operator UI. A
+      // permanent five-second simulator/timeline poll for every on-air
+      // channel competes with FFmpeg on CPU-only servers and can starve HLS.
     }
   }
 
@@ -1025,7 +1026,6 @@ class BlueprintPlaybackService {
     if (blueprintId) {
       blueprintService.invalidateTimelineCaches(blueprintId, 'CHANNEL_RESTART');
     }
-    playbackSyncService.stopMonitoring(channelId);
     this.runtimes.delete(channelId);
     this.clearPersistedState(channelId);
   }
