@@ -226,29 +226,23 @@ class FfmpegService {
       if (state.failures < CONTENT_FAILURE_LIMIT) return;
 
       state.failures = 0;
-      const quarantined = await this.quarantineCurrentBlueprintItem(channelId, info, result.status);
+      // HLS black-detection is useful telemetry, but it cannot reliably tell
+      // a deliberately dark scene, a fade, or a short cinematic intro from
+      // broken source media. Never change a user's playlist or interrupt the
+      // encoder based on this heuristic alone. Operators get a clear warning
+      // and can review the media themselves.
       monitorService.addLog(
         channelId,
-        'ERROR',
-        quarantined
-          ? `Content watchdog removed failing media "${quarantined}" and is continuing with the next playable item.`
-          : result.status === 'black'
-            ? 'Content watchdog detected sustained black video. Recovering channel...'
-            : 'Content watchdog could not decode the published video. Recovering channel...'
+        'WARN',
+        result.status === 'black'
+          ? 'Content watchdog detected a sustained dark output segment. Media was not removed and the channel remains on air; review it before taking action.'
+          : 'Content watchdog could not decode a published segment. Media was not removed and the channel remains on air; review the channel logs.'
       );
-      // A Blueprint encoder reads its concat window as one continuous program.
-      // Once the bad item has been quarantined, killing that encoder creates a
-      // visible HLS discontinuity for every viewer, while leaving it running
-      // lets FFmpeg move to the next entry naturally. The regenerated window
-      // excludes the item on its next roll, so it cannot return to air.
-      if (quarantined) {
-        logger.warn(
-          `[CONTENT_WATCHDOG] channel=${info.slug} quarantined media without encoder restart; ` +
-            'preserving the on-air HLS timeline'
-        );
-        return;
-      }
-      await this.forceKill(channelId);
+      logger.warn(
+        `[CONTENT_WATCHDOG] channel=${info.slug} advisory-only status=${result.status}; ` +
+          'no media was quarantined and no encoder restart was requested'
+      );
+      return;
     } catch (error) {
       logger.warn(`[CONTENT_WATCHDOG] probe failed channel=${info.slug}:`, error);
     } finally {
