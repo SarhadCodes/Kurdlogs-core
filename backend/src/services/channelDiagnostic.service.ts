@@ -73,15 +73,26 @@ class ChannelDiagnosticService {
   private summarize(run: ChannelDiagnostic): string[] {
     const samples = run.samples;
     if (!samples.length) return ['No samples were captured.'];
-    const stale = samples.filter((s) => !s.hlsPlayable || (s.manifestAgeSec ?? Infinity) > 30);
-    const ended = samples.filter((s) => s.manifestEnded);
-    const noProc = samples.filter((s) => !s.processRunning);
-    const slow = samples.filter((s) => { const n = parseFloat(s.speed); return n > 0 && n < 0.9; });
+    // An HLS encoder needs a short period to produce a new manifest and segment
+    // after a channel is started. Treat that warm-up as baseline collection, not
+    // as an on-air failure, otherwise every diagnostic started after a recovery
+    // would report a false freeze.
+    const settledSamples = samples.filter((sample) =>
+      Date.parse(sample.at) - Date.parse(run.startedAt) >= 60_000,
+    );
+    if (!settledSamples.length) {
+      return ['Collecting the one-minute post-start baseline before evaluating HLS health.'];
+    }
+    const stale = settledSamples.filter((s) => !s.hlsPlayable || (s.manifestAgeSec ?? Infinity) > 30);
+    const ended = settledSamples.filter((s) => s.manifestEnded);
+    const noProc = settledSamples.filter((s) => !s.processRunning);
+    const slow = settledSamples.filter((s) => { const n = parseFloat(s.speed); return n > 0 && n < 0.9; });
+    const total = settledSamples.length;
     const messages: string[] = [];
-    if (noProc.length) messages.push(`Encoder missing in ${noProc.length}/${samples.length} samples — channel process stopped.`);
-    if (ended.length) messages.push(`HLS playlist contained ENDLIST in ${ended.length}/${samples.length} samples — output was finalized instead of live.`);
-    if (stale.length) messages.push(`HLS was stale or unplayable in ${stale.length}/${samples.length} samples — inspect FFmpeg and segment delivery.`);
-    if (slow.length) messages.push(`Encoder speed below 0.90x in ${slow.length}/${samples.length} samples — CPU/encoder cannot keep up.`);
+    if (noProc.length) messages.push(`Encoder missing in ${noProc.length}/${total} settled samples — channel process stopped.`);
+    if (ended.length) messages.push(`HLS playlist contained ENDLIST in ${ended.length}/${total} settled samples — output was finalized instead of live.`);
+    if (stale.length) messages.push(`HLS was stale or unplayable in ${stale.length}/${total} settled samples — inspect FFmpeg and segment delivery.`);
+    if (slow.length) messages.push(`Encoder speed below 0.90x in ${slow.length}/${total} settled samples — CPU/encoder cannot keep up.`);
     if (!messages.length) messages.push('No encoder or HLS stall was detected during this 10-minute capture. If playback still freezes, export this report and compare client/network timestamps.');
     return messages;
   }
