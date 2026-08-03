@@ -23,8 +23,8 @@ export interface ChannelDiagnostic {
   channelId: string;
   slug: string;
   startedAt: string;
-  endsAt: string;
-  status: 'RUNNING' | 'COMPLETE';
+  endsAt: string | null;
+  status: 'RUNNING';
   samples: DiagnosticSample[];
   summary: string[];
 }
@@ -32,8 +32,51 @@ export interface ChannelDiagnostic {
 class ChannelDiagnosticService {
   private runs = new Map<string, ChannelDiagnostic>();
   private timers = new Map<string, NodeJS.Timeout>();
-  private readonly durationMs = 10 * 60 * 1000;
   private readonly sampleMs = 30 * 1000;
+  private readonly maxSamples = 7 * 24 * 60 * 2;
+  private fleetTimer: NodeJS.Timeout | null = null;
+
+  private publicReport(run: ChannelDiagnostic): ChannelDiagnostic {
+    return {
+      ...run,
+      // Keep polling responses bounded even after the recorder has run for
+      // days. Full retention remains in memory/on disk for diagnosis.
+      samples: run.samples.slice(-500),
+      summary: [...run.summary],
+    };
+  }
+
+  private diagnosticPath(channelId: string): string {
+    return path.join(env.STREAMS_DIR, 'diagnostics', `${channelId}.jsonl`);
+  }
+
+  private loadHistory(channelId: string): DiagnosticSample[] {
+    const file = this.diagnosticPath(channelId);
+    if (!fs.existsSync(file)) return [];
+    try {
+      return fs.readFileSync(file, 'utf8')
+        .split(/\r?\n/)
+        .filter(Boolean)
+        .slice(-this.maxSamples)
+        .map((line) => JSON.parse(line) as DiagnosticSample);
+    } catch {
+      return [];
+    }
+  }
+
+  private persistSample(channelId: string, sample: DiagnosticSample): void {
+    const file = this.diagnosticPath(channelId);
+    try {
+      fs.mkdirSync(path.dirname(file), { recursive: true });
+      fs.appendFileSync(file, `${JSON.stringify(sample)}\n`, 'utf8');
+      const stat = fs.statSync(file);
+      if (stat.size <= 10 * 1024 * 1024) return;
+      const lines = fs.readFileSync(file, 'utf8').split(/\r?\n/).filter(Boolean);
+      fs.writeFileSync(file, `${lines.slice(-this.maxSamples).join('\n')}\n`, 'utf8');
+    } catch {
+      // The live watchdog remains authoritative if diagnostic persistence fails.
+    }
+  }
 
   private inspect(channelId: string, slug: string): DiagnosticSample {
     const now = Date.now();
@@ -97,37 +140,54 @@ class ChannelDiagnosticService {
     return messages;
   }
 
-  private finish(channelId: string) {
-    const run = this.runs.get(channelId);
-    if (!run) return;
-    run.status = 'COMPLETE';
-    run.summary = this.summarize(run);
-    const timer = this.timers.get(channelId);
-    if (timer) clearInterval(timer);
-    this.timers.delete(channelId);
-  }
-
   async start(channelId: string): Promise<ChannelDiagnostic> {
     const channel = await prisma.channel.findUnique({ where: { id: channelId }, select: { slug: true } });
     if (!channel) throw new Error('Channel not found');
     const existing = this.runs.get(channelId);
-    if (existing?.status === 'RUNNING') return existing;
+    if (existing) return this.publicReport(existing);
     const now = Date.now();
-    const run: ChannelDiagnostic = { channelId, slug: channel.slug, startedAt: new Date(now).toISOString(), endsAt: new Date(now + this.durationMs).toISOString(), status: 'RUNNING', samples: [], summary: [] };
+    const history = this.loadHistory(channelId);
+    const run: ChannelDiagnostic = {
+      channelId,
+      slug: channel.slug,
+      startedAt: history[0]?.at ?? new Date(now).toISOString(),
+      endsAt: null,
+      status: 'RUNNING',
+      samples: history,
+      summary: [],
+    };
     const take = () => {
-      run.samples.push(this.inspect(channelId, channel.slug));
-      if (Date.now() >= now + this.durationMs) this.finish(channelId);
+      const sample = this.inspect(channelId, channel.slug);
+      run.samples.push(sample);
+      if (run.samples.length > this.maxSamples) {
+        run.samples.splice(0, run.samples.length - this.maxSamples);
+      }
+      run.summary = this.summarize(run);
+      this.persistSample(channelId, sample);
     };
     take();
     this.runs.set(channelId, run);
     this.timers.set(channelId, setInterval(take, this.sampleMs));
-    return run;
+    return this.publicReport(run);
+  }
+
+  async startContinuousMonitoring(): Promise<void> {
+    if (this.fleetTimer) return;
+    const discover = async () => {
+      const channels = await prisma.channel.findMany({
+        where: { status: { in: ['ONLINE', 'STARTING', 'ERROR'] } },
+        select: { id: true },
+      });
+      await Promise.all(channels.map((channel) => this.start(channel.id)));
+    };
+    await discover();
+    this.fleetTimer = setInterval(() => void discover().catch(() => {}), 60_000);
   }
 
   get(channelId: string): ChannelDiagnostic | null {
     const run = this.runs.get(channelId) ?? null;
-    if (run?.status === 'RUNNING') run.summary = this.summarize(run);
-    return run;
+    if (run) run.summary = this.summarize(run);
+    return run ? this.publicReport(run) : null;
   }
 }
 

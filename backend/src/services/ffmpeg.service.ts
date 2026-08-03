@@ -1136,9 +1136,20 @@ class FfmpegService {
     }
 
     mainProcess.on('close', async (code) => {
-      const wasIntentional = !this.processes.has(channel.id);
+      // A replacement encoder can be registered before the previous child has
+      // emitted its delayed `close` event. The old handler must never delete
+      // or reconnect over the replacement; that leaves a live-but-untracked
+      // FFmpeg process which the watchdog can no longer recover.
+      const registered = this.processes.get(channel.id);
+      const ownsRegistration = registered?.pid === mainProcess.pid;
+      if (!ownsRegistration) {
+        logger.info(
+          `[ENCODER_OWNERSHIP] ignored stale close channel=${channel.slug} ` +
+            `closedPid=${mainProcess.pid ?? 'none'} activePid=${registered?.pid ?? 'none'}`
+        );
+        return;
+      }
       this.processes.delete(channel.id);
-      if (wasIntentional) return;
 
       logger.warn(`Playlist FFmpeg for ${channel.name} exited (code ${code}).`);
       monitorService.addLog(channel.id, 'WARN', `Playlist FFmpeg exited with code ${code}.`);
@@ -1677,28 +1688,30 @@ class FfmpegService {
     );
 
     child.on('close', async (code) => {
-      const wasIntentional = !this.processes.has(channel.id);
+      const registered = this.processes.get(channel.id);
+      const ownsRegistration = registered?.pid === child.pid;
+      if (!ownsRegistration) {
+        logger.info(
+          `[ENCODER_OWNERSHIP] ignored stale MCR close channel=${channel.slug} ` +
+            `closedPid=${child.pid ?? 'none'} activePid=${registered?.pid ?? 'none'}`
+        );
+        return;
+      }
       const sourceUnreachable = info.sourceUnreachable;
       this.processes.delete(channel.id);
 
       prisma.channel.update({ where: { id: channel.id }, data: { pid: null } }).catch(() => {});
 
-      if (!wasIntentional) {
-        logger.warn(`FFmpeg MCR copy for ${channel.name} exited (code ${code}).`);
-        monitorService.addLog(channel.id, 'WARN', `MCR encoder exited with code ${code}.`);
-        if (sourceUnreachable) {
-          monitorService.addLog(channel.id, 'ERROR', 'Stopped reconnecting: fix the MCR bus and restart the channel.');
-          await prisma.channel.update({ where: { id: channel.id }, data: { status: 'ERROR' } });
-          wsService.emitChannelStatus(channel.id, 'ERROR');
-          this.reconnectAttempts.delete(channel.id);
-          return;
-        }
-        this.triggerReconnect(channel.id);
-      } else {
-        prisma.channel.update({ where: { id: channel.id }, data: { status: 'OFFLINE' } }).catch(() => {});
-        wsService.emitChannelStatus(channel.id, 'OFFLINE');
+      logger.warn(`FFmpeg MCR copy for ${channel.name} exited (code ${code}).`);
+      monitorService.addLog(channel.id, 'WARN', `MCR encoder exited with code ${code}.`);
+      if (sourceUnreachable) {
+        monitorService.addLog(channel.id, 'ERROR', 'Stopped reconnecting: fix the MCR bus and restart the channel.');
+        await prisma.channel.update({ where: { id: channel.id }, data: { status: 'ERROR' } });
+        wsService.emitChannelStatus(channel.id, 'ERROR');
         this.reconnectAttempts.delete(channel.id);
+        return;
       }
+      this.triggerReconnect(channel.id);
     });
 
     child.on('error', (err) => {
@@ -1784,28 +1797,30 @@ class FfmpegService {
     this.scheduleOnlineConfirmation(channel, child, info);
 
     child.on('close', async (code) => {
-      const wasIntentional = !this.processes.has(channel.id);
+      const registered = this.processes.get(channel.id);
+      const ownsRegistration = registered?.pid === child.pid;
+      if (!ownsRegistration) {
+        logger.info(
+          `[ENCODER_OWNERSHIP] ignored stale direct close channel=${channel.slug} ` +
+            `closedPid=${child.pid ?? 'none'} activePid=${registered?.pid ?? 'none'}`
+        );
+        return;
+      }
       const sourceUnreachable = info.sourceUnreachable;
       this.processes.delete(channel.id);
 
       prisma.channel.update({ where: { id: channel.id }, data: { pid: null } }).catch(() => {});
 
-      if (!wasIntentional) {
-        logger.warn(`FFmpeg for ${channel.name} exited (code ${code}).`);
-        monitorService.addLog(channel.id, 'WARN', `FFmpeg exited with code ${code}.`);
-        if (sourceUnreachable) {
-          monitorService.addLog(channel.id, 'ERROR', 'Stopped reconnecting: fix the source URL and restart the channel.');
-          await prisma.channel.update({ where: { id: channel.id }, data: { status: 'ERROR' } });
-          wsService.emitChannelStatus(channel.id, 'ERROR');
-          this.reconnectAttempts.delete(channel.id);
-          return;
-        }
-        this.triggerReconnect(channel.id);
-      } else {
-        prisma.channel.update({ where: { id: channel.id }, data: { status: 'OFFLINE' } }).catch(() => {});
-        wsService.emitChannelStatus(channel.id, 'OFFLINE');
+      logger.warn(`FFmpeg for ${channel.name} exited (code ${code}).`);
+      monitorService.addLog(channel.id, 'WARN', `FFmpeg exited with code ${code}.`);
+      if (sourceUnreachable) {
+        monitorService.addLog(channel.id, 'ERROR', 'Stopped reconnecting: fix the source URL and restart the channel.');
+        await prisma.channel.update({ where: { id: channel.id }, data: { status: 'ERROR' } });
+        wsService.emitChannelStatus(channel.id, 'ERROR');
         this.reconnectAttempts.delete(channel.id);
+        return;
       }
+      this.triggerReconnect(channel.id);
     });
 
     child.on('error', (err) => {

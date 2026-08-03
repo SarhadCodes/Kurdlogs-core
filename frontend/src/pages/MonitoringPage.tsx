@@ -67,7 +67,7 @@ export default function MonitoringPage() {
     try {
       const response = await monitorApi.startChannelDiagnostic(channelId);
       setDiagnostic(response.data);
-      toast.success('10-minute diagnostic started');
+      toast.success('Continuous flight recorder enabled');
     } catch {
       toast.error('Could not start diagnostic');
     } finally {
@@ -343,7 +343,7 @@ export default function MonitoringPage() {
                             className="inline-flex items-center gap-1 rounded border border-violet-500/40 px-2 py-1 text-xs text-violet-300 hover:bg-violet-500/10 disabled:opacity-50"
                           >
                             <Stethoscope className="h-3.5 w-3.5" />
-                            {diagnosticBusy === ch.channelId ? 'Starting' : 'Run 10 min'}
+                            {diagnosticBusy === ch.channelId ? 'Starting' : 'Open recorder'}
                           </button>
                         </td>
                       </tr>
@@ -364,11 +364,11 @@ export default function MonitoringPage() {
               <div className="rounded-lg border border-violet-500/30 bg-[#111] p-5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div>
-                    <h3 className="flex items-center gap-2 font-medium text-white"><Stethoscope className="h-5 w-5 text-violet-300" /> 10-minute stream diagnostic</h3>
+                    <h3 className="flex items-center gap-2 font-medium text-white"><Stethoscope className="h-5 w-5 text-violet-300" /> Continuous stream flight recorder</h3>
                     <p className="mt-1 text-xs text-gray-500">{diagnostic.slug} · {diagnostic.status} · {diagnostic.samples?.length ?? 0} samples</p>
                   </div>
                   <span className={diagnostic.status === 'COMPLETE' ? 'text-xs text-emerald-400' : 'text-xs text-violet-300'}>
-                    {diagnostic.status === 'COMPLETE' ? 'Capture complete' : `Running until ${new Date(diagnostic.endsAt).toLocaleTimeString()}`}
+                    Monitoring continuously · retaining seven days
                   </span>
                 </div>
                 <ul className="mt-4 space-y-2 text-sm text-gray-300">

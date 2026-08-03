@@ -91,7 +91,7 @@ export const startChannelDiagnostic = async (req: Request, res: Response) => {
 
 export const getChannelDiagnostic = async (req: Request, res: Response) => {
   const data = channelDiagnosticService.get(String(req.params.channelId));
-  if (!data) throw new AppError('No diagnostic run for this channel. Start a 10-minute capture first.', 404);
+  if (!data) throw new AppError('No flight-recorder data for this channel yet.', 404);
   res.json({ success: true, data });
 };
 

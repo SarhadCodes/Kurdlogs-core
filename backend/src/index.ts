@@ -159,6 +159,9 @@ server.listen(env.PORT, async () => {
      // Recover channels that were running before shutdown (after MCR bus is ready)
      await ffmpegService.recoverChannels();
 
+     const { channelDiagnosticService } = await import('./services/channelDiagnostic.service');
+     await channelDiagnosticService.startContinuousMonitoring();
+
      // Control Room removed
 
      const { mcrStabilityService } = await import('./services/mcrStability.service');
