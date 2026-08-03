@@ -10,6 +10,7 @@ import {
   Upload,
   Zap,
   Tv2,
+  Stethoscope,
 } from 'lucide-react';
 import { monitorApi } from '../services/api';
 import Layout from '../components/Layout';
@@ -38,6 +39,8 @@ export default function MonitoringPage() {
   const [refreshing, setRefreshing] = useState(false);
   const [autoRefresh, setAutoRefresh] = useState(true);
   const [backupBusy, setBackupBusy] = useState(false);
+  const [diagnostic, setDiagnostic] = useState<any>(null);
+  const [diagnosticBusy, setDiagnosticBusy] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   const fetchMonitoringData = async (silent = false) => {
@@ -58,6 +61,30 @@ export default function MonitoringPage() {
       setRefreshing(false);
     }
   };
+
+  const startDiagnostic = async (channelId: string) => {
+    setDiagnosticBusy(channelId);
+    try {
+      const response = await monitorApi.startChannelDiagnostic(channelId);
+      setDiagnostic(response.data);
+      toast.success('10-minute diagnostic started');
+    } catch {
+      toast.error('Could not start diagnostic');
+    } finally {
+      setDiagnosticBusy(null);
+    }
+  };
+
+  useEffect(() => {
+    if (!diagnostic?.channelId || diagnostic.status !== 'RUNNING') return;
+    const interval = setInterval(async () => {
+      try {
+        const response = await monitorApi.getChannelDiagnostic(diagnostic.channelId);
+        setDiagnostic(response.data);
+      } catch { /* keep the last visible result */ }
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [diagnostic?.channelId, diagnostic?.status]);
 
   useEffect(() => {
     if (tab !== 'overview') return;
@@ -289,6 +316,7 @@ export default function MonitoringPage() {
                       <th className="px-4 py-3">Bitrate</th>
                       <th className="px-4 py-3">Speed</th>
                       <th className="px-4 py-3">Viewers</th>
+                      <th className="px-4 py-3">Diagnostic</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -307,11 +335,22 @@ export default function MonitoringPage() {
                         <td className="px-4 py-3 text-gray-400">{ch.bitrate} kbps</td>
                         <td className="px-4 py-3 text-gray-400">{ch.speed}</td>
                         <td className="px-4 py-3 text-gray-400">{ch.viewers}</td>
+                        <td className="px-4 py-3">
+                          <button
+                            type="button"
+                            onClick={() => startDiagnostic(ch.channelId)}
+                            disabled={diagnosticBusy === ch.channelId}
+                            className="inline-flex items-center gap-1 rounded border border-violet-500/40 px-2 py-1 text-xs text-violet-300 hover:bg-violet-500/10 disabled:opacity-50"
+                          >
+                            <Stethoscope className="h-3.5 w-3.5" />
+                            {diagnosticBusy === ch.channelId ? 'Starting' : 'Run 10 min'}
+                          </button>
+                        </td>
                       </tr>
                     ))}
                     {health.length === 0 && (
                       <tr>
-                        <td colSpan={7} className="px-4 py-8 text-center text-gray-500">
+                        <td colSpan={8} className="px-4 py-8 text-center text-gray-500">
                           No channels configured
                         </td>
                       </tr>
@@ -320,6 +359,27 @@ export default function MonitoringPage() {
                 </table>
               </div>
             </div>
+
+            {diagnostic && (
+              <div className="rounded-lg border border-violet-500/30 bg-[#111] p-5">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div>
+                    <h3 className="flex items-center gap-2 font-medium text-white"><Stethoscope className="h-5 w-5 text-violet-300" /> 10-minute stream diagnostic</h3>
+                    <p className="mt-1 text-xs text-gray-500">{diagnostic.slug} · {diagnostic.status} · {diagnostic.samples?.length ?? 0} samples</p>
+                  </div>
+                  <span className={diagnostic.status === 'COMPLETE' ? 'text-xs text-emerald-400' : 'text-xs text-violet-300'}>
+                    {diagnostic.status === 'COMPLETE' ? 'Capture complete' : `Running until ${new Date(diagnostic.endsAt).toLocaleTimeString()}`}
+                  </span>
+                </div>
+                <ul className="mt-4 space-y-2 text-sm text-gray-300">
+                  {(diagnostic.summary || []).map((item: string, index: number) => <li key={index} className="rounded border border-[#2c2c2c] bg-black/20 px-3 py-2">{item}</li>)}
+                </ul>
+                {diagnostic.samples?.length > 0 && (() => {
+                  const last = diagnostic.samples[diagnostic.samples.length - 1];
+                  return <p className="mt-3 text-xs text-gray-500">Latest: encoder {last.processRunning ? 'running' : 'missing'} · HLS {last.hlsPlayable ? 'playable' : 'stale'} · manifest age {last.manifestAgeSec == null ? 'unavailable' : `${last.manifestAgeSec.toFixed(1)}s`} · segment {last.newestSegment || 'none'}</p>;
+                })()}
+              </div>
+            )}
 
             <div className="bg-[#111111] border border-[#333333] rounded-lg overflow-hidden flex flex-col h-[min(500px,55vh)] sm:h-[500px]">
               <div className="px-5 py-4 border-b border-[#333333] flex justify-between items-center bg-[#1a1a1a]">

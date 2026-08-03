@@ -9,6 +9,7 @@ import { appLogService } from '../services/appLog.service';
 import fs from 'fs';
 import { AuthRequest } from '../types';
 import { StorageCleanupTarget, storageService } from '../services/storage.service';
+import { channelDiagnosticService } from '../services/channelDiagnostic.service';
 
 export const getGpuEncoderStatus = async (_req: Request, res: Response) => {
   res.json({ success: true, data: gpuEncoderService.getStatus() });
@@ -81,6 +82,17 @@ export const getChannelHealth = async (req: Request, res: Response) => {
       stats: processInfo?.stats || null
     }
   });
+};
+
+export const startChannelDiagnostic = async (req: Request, res: Response) => {
+  const data = await channelDiagnosticService.start(String(req.params.channelId));
+  res.json({ success: true, data });
+};
+
+export const getChannelDiagnostic = async (req: Request, res: Response) => {
+  const data = channelDiagnosticService.get(String(req.params.channelId));
+  if (!data) throw new AppError('No diagnostic run for this channel. Start a 10-minute capture first.', 404);
+  res.json({ success: true, data });
 };
 
 export const getGlobalLogs = async (req: Request, res: Response) => {

@@ -230,6 +230,10 @@ export const monitorApi = {
       confirm: 'CLEAR_STORAGE',
     }),
   getChannelHealth: () => api.get<any, ApiResponse<import('../types').ChannelHealthReport[]>>('/monitoring/health'),
+  startChannelDiagnostic: (channelId: string) =>
+    api.post<any, ApiResponse<any>>(`/monitoring/diagnostics/${channelId}/start`),
+  getChannelDiagnostic: (channelId: string) =>
+    api.get<any, ApiResponse<any>>(`/monitoring/diagnostics/${channelId}`),
   getLogs: (limit: number = 50) => api.get<any, ApiResponse<StreamLog[]>>(`/monitoring/logs?limit=${limit}`),
   getAppLogs: (limit = 100, category?: string) => {
     const q = new URLSearchParams({ limit: String(limit) });

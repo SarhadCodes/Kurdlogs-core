@@ -21,6 +21,8 @@ router.get('/logs', asyncHandler(monitoringController.getGlobalLogs));
 router.get('/app-logs', asyncHandler(monitoringController.getAppLogs));
 router.get('/app-logs/export', asyncHandler(monitoringController.exportAppLogs));
 router.get('/health/:channelId', asyncHandler(monitoringController.getChannelHealth));
+router.post('/diagnostics/:channelId/start', asyncHandler(monitoringController.startChannelDiagnostic));
+router.get('/diagnostics/:channelId', asyncHandler(monitoringController.getChannelDiagnostic));
 router.get('/backup/export', asyncHandler(monitoringController.exportBackup));
 router.post('/backup/import', asyncHandler(monitoringController.importBackup));
 
