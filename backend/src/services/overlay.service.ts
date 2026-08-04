@@ -228,8 +228,13 @@ class OverlayService {
           parts.push(`[${ol}s]colorchannelmixer=aa=${opacity.toFixed(3)}[${ol}]`);
         }
 
+        // Static image inputs are intentionally looped so the logo remains on
+        // screen for the entire program. They must not, however, keep the
+        // output alive after the primary program input reaches EOF. With
+        // shortest=0 FFmpeg repeated the program's final frame forever while
+        // the logo continued, producing fresh-but-frozen HLS segments.
         parts.push(
-          `${currentInput}[${imgLabel}]overlay=${x}:${y}:format=auto:eof_action=repeat:shortest=0${scheduleEnable}${outputName}`
+          `${currentInput}[${imgLabel}]overlay=${x}:${y}:format=auto:eof_action=repeat:shortest=1${scheduleEnable}${outputName}`
         );
         imageInputIndex++;
       } else if (overlay.type === 'SCROLLING_TEXT') {

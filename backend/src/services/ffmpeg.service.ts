@@ -574,7 +574,10 @@ class FfmpegService {
 
   // ─── Auto-reconnect with exponential backoff ──────────────
 
-  private async triggerReconnect(channelId: string): Promise<void> {
+  private async triggerReconnect(
+    channelId: string,
+    options?: { immediate?: boolean }
+  ): Promise<void> {
     const { hybridChannelService } = await import('./hybridChannel.service');
     if (await hybridChannelService.isLiveOverride(channelId)) {
       const state = await prisma.hybridChannelState.findUnique({ where: { channelId } });
@@ -618,7 +621,12 @@ class FfmpegService {
 
     const attempts = this.reconnectAttempts.get(channelId) || 0;
     this.reconnectAttempts.set(channelId, attempts + 1);
-    const delay = Math.min(channel.reconnectDelay * Math.pow(2, Math.min(attempts, 8)), MAX_BACKOFF_MS);
+    const delay = options?.immediate
+      ? 0
+      : Math.min(
+          channel.reconnectDelay * Math.pow(2, Math.min(attempts, 8)),
+          MAX_BACKOFF_MS
+        );
 
     await prisma.channel.update({ where: { id: channelId }, data: { status: 'ERROR' } });
     wsService.emitChannelStatus(channelId, 'ERROR');
@@ -1180,7 +1188,10 @@ class FfmpegService {
             windowsEmitted: persisted?.windowsEmitted,
           });
           monitorService.addLog(channel.id, 'INFO', 'Blueprint window advanced — loading next videos.');
-          this.triggerReconnect(channel.id);
+          // A clean EOF is the expected end of a finite Blueprint window.
+          // Start its successor immediately; the existing HLS buffer covers
+          // encoder startup and viewers continue using the same URL.
+          this.triggerReconnect(channel.id, { immediate: code === 0 });
           return;
         }
         await prisma.channel.update({ where: { id: channel.id }, data: { status: 'OFFLINE' } });
@@ -1439,6 +1450,10 @@ class FfmpegService {
     args.push(
       '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
       '-max_muxing_queue_size', '2048',
+      // A looped graphics input must never extend a finite playlist window.
+      // End with the program/audio source so the normal window rollover can
+      // start the next batch instead of encoding the last frame forever.
+      '-shortest',
     );
     if (startNumber != null && startNumber > 0) {
       args.push('-start_number', String(startNumber));
