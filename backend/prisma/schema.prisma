@@ -216,6 +216,8 @@ model Channel {
   useBlueprint         Boolean             @default(false)
   blueprintId          String?             @unique
   blueprint            ChannelBlueprint?   @relation(fields: [blueprintId], references: [id])
+  /// Logical on-air session start. Internal encoder/window handoffs do not reset it.
+  onAirSince           DateTime?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 

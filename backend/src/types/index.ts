@@ -9,7 +9,10 @@ export interface FfmpegProcessInfo {
   process: ChildProcess;
   inputType: string;
   playbackSource?: 'BLUEPRINT' | 'PLAYLIST' | 'MCR_BUS' | 'MCR_SWITCHER';
+  /** Current FFmpeg child start, used for process-level health checks. */
   startTime: Date;
+  /** Logical broadcast session start, preserved across seamless encoder handoffs. */
+  sessionStartTime: Date;
   stats: StreamStats;
   lastProgressTime: number;
   markedOnline: boolean;

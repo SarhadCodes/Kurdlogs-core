@@ -866,7 +866,7 @@ const ChannelDetailPage: React.FC = () => {
                     value={`${currentStats.fps || 0}`}
                   />
                   <StatRow
-                    label="Uptime"
+                    label="On-air uptime"
                     value={formatUptime(currentStats.uptime)}
                   />
                   {channel.status === 'ONLINE' && previewToolsOpen && (

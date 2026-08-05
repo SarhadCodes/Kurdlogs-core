@@ -79,7 +79,9 @@ class MonitorService {
       const cpuPct = this.readProcessCpu(processInfo.pid);
       if (cpuPct !== null) processInfo.stats.cpu = cpuPct;
 
-      processInfo.stats.uptime = Math.floor((Date.now() - processInfo.startTime.getTime()) / 1000);
+      processInfo.stats.uptime = Math.floor(
+        (Date.now() - processInfo.sessionStartTime.getTime()) / 1000
+      );
       processInfo.stats.gpu = gpuUsage;
 
       const slug = slugMap.get(channelId);

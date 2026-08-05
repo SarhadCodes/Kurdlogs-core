@@ -254,7 +254,7 @@ export default function ChannelCard({ channel, onClick, onDelete }: ChannelCardP
           <StatItem icon={<HardDrive className="w-3 h-3" />} label="RAM" value={isLive ? `${stats?.ram || 0} MB` : '--'} />
           <StatItem icon={<Monitor className="w-3 h-3" />} label="GPU" value={isLive ? formatGpu(stats?.gpu) : '--'} />
           <StatItem icon={<Gauge className="w-3 h-3" />} label="Bitrate" value={isLive ? formatBitrate(stats?.bitrate) : '--'} />
-          <StatItem icon={<Clock className="w-3 h-3" />} label="Uptime" value={isLive ? formatUptime(stats?.uptime) : '--'} />
+          <StatItem icon={<Clock className="w-3 h-3" />} label="On-air uptime" value={isLive ? formatUptime(stats?.uptime) : '--'} />
           <StatItem
             icon={<Heart className="w-3 h-3" />}
             label="Health"

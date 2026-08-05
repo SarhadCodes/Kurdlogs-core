@@ -318,7 +318,10 @@ class FfmpegService {
           logger.warn(`Stream for channel ${channel.name} is already running.`);
           return;
         }
-        await this.stopStream(channel.id);
+        // A forced replacement is an internal handoff/recovery, not an
+        // operator ending the broadcast. Keep the logical on-air session;
+        // startStream will still reset it if the public HLS output is stale.
+        await this.stopStream(channel.id, { preserveOnAirSession: true });
         await this.killChannelPid(channel.id);
         await sleep(1000);
       }
@@ -329,6 +332,20 @@ class FfmpegService {
       await this.clearStaleChannelEncoders(channel.id, channel.slug);
 
       this.ensureOutputDir(channel.slug);
+
+      // A Blueprint window, short encoder recovery, or backend recovery may
+      // replace the FFmpeg child while the buffered HLS output remains on air.
+      // Preserve that logical broadcast session; a real Stop clears the
+      // persisted timestamp and a stale HLS output begins a new session.
+      const sessionRow = await prisma.channel.findUnique({
+        where: { id: channel.id },
+        select: { onAirSince: true },
+      });
+      const storedOnAirSince = sessionRow?.onAirSince ?? null;
+      const sessionStartTime = storedOnAirSince && hasRecentHlsSegments(channel.slug)
+        ? storedOnAirSince
+        : new Date();
+      channel = { ...channel, onAirSince: sessionStartTime };
 
       const { sourceRouterService } = await import('./sourceRouter.service');
       const isMcrBus =
@@ -423,7 +440,10 @@ class FfmpegService {
     }
   }
 
-  public async stopStream(channelId: string, options?: { preserveBlueprintRuntime?: boolean }): Promise<void> {
+  public async stopStream(
+    channelId: string,
+    options?: { preserveBlueprintRuntime?: boolean; preserveOnAirSession?: boolean }
+  ): Promise<void> {
     const processInfo = this.processes.get(channelId);
     if (processInfo) {
       logger.info(`Stopping stream for channel ${channelId}`);
@@ -435,7 +455,11 @@ class FfmpegService {
         await mcrProgramEncoderService.stop(channelId, 'stopStream');
         await prisma.channel.update({
           where: { id: channelId },
-          data: { status: 'OFFLINE', pid: null },
+          data: {
+            status: 'OFFLINE',
+            pid: null,
+            ...(!options?.preserveOnAirSession ? { onAirSince: null } : {}),
+          },
         });
         wsService.emitChannelStatus(channelId, 'OFFLINE');
         return;
@@ -459,7 +483,11 @@ class FfmpegService {
     await this.killChannelPid(channelId);
     await prisma.channel.update({
       where: { id: channelId },
-      data: { status: 'OFFLINE', pid: null },
+      data: {
+        status: 'OFFLINE',
+        pid: null,
+        ...(!options?.preserveOnAirSession ? { onAirSince: null } : {}),
+      },
     });
     wsService.emitChannelStatus(channelId, 'OFFLINE');
   }
@@ -487,7 +515,9 @@ class FfmpegService {
   }
 
   public async restartStream(channelId: string, _legacyChannel?: any): Promise<void> {
-    await this.stopStream(channelId);
+    // Restart replaces the encoder but does not end the logical on-air
+    // session while the existing HLS buffer remains playable.
+    await this.stopStream(channelId, { preserveOnAirSession: true });
     await this.killChannelPid(channelId);
     await sleep(2000);
 
@@ -502,7 +532,10 @@ class FfmpegService {
 
   /** Hard restart — used after blueprint publish so FFmpeg picks up the new concat. */
   public async forceRestartChannel(channelId: string): Promise<void> {
-    await this.stopStream(channelId, { preserveBlueprintRuntime: true });
+    await this.stopStream(channelId, {
+      preserveBlueprintRuntime: true,
+      preserveOnAirSession: true,
+    });
     await this.forceKill(channelId);
     await this.killChannelPid(channelId);
     await sleep(2500);
@@ -610,7 +643,12 @@ class FfmpegService {
       include: { transcodingProfile: true, overlays: true, playlist: true, blueprint: true },
     });
     if (!channel || !channel.autoReconnect) {
-      await prisma.channel.update({ where: { id: channelId }, data: { status: 'OFFLINE' } });
+      if (channel) {
+        await prisma.channel.update({
+          where: { id: channelId },
+          data: { status: 'OFFLINE', onAirSince: null },
+        });
+      }
       wsService.emitChannelStatus(channelId, 'OFFLINE');
       return;
     }
@@ -678,6 +716,9 @@ class FfmpegService {
       slug: channel.slug,
       playbackSource,
       startTime: new Date(),
+      sessionStartTime: channel.onAirSince instanceof Date
+        ? channel.onAirSince
+        : new Date(channel.onAirSince || Date.now()),
       stats: { cpu: 0, ram: 0, gpu: 0, bitrate: 0, fps: 0, uptime: 0, frames: 0, speed: '0x' },
       lastProgressTime: Date.now(),
       markedOnline: false,
@@ -713,7 +754,7 @@ class FfmpegService {
           info.stats = {
             ...info.stats,
             ...stats,
-            uptime: Math.floor((Date.now() - info.startTime.getTime()) / 1000),
+            uptime: Math.floor((Date.now() - info.sessionStartTime.getTime()) / 1000),
           };
           if (info.playbackSource === 'BLUEPRINT') {
             import('./blueprintPlayback.service').then(({ blueprintPlaybackService }) => {
@@ -797,7 +838,10 @@ class FfmpegService {
       if (this.hasConfirmedMediaFlow(channel.slug, info, startedAtMs)) {
         info.markedOnline = true;
         this.reconnectAttempts.set(channel.id, 0);
-        prisma.channel.update({ where: { id: channel.id }, data: { status: 'ONLINE' } }).catch(() => {});
+        prisma.channel.update({
+          where: { id: channel.id },
+          data: { status: 'ONLINE', onAirSince: info.sessionStartTime },
+        }).catch(() => {});
         prisma.channelGraphics.updateMany({
           where: {
             channelId: channel.id,
@@ -1214,7 +1258,10 @@ class FfmpegService {
           });
           return;
         }
-        await prisma.channel.update({ where: { id: channel.id }, data: { status: 'OFFLINE' } });
+        await prisma.channel.update({
+          where: { id: channel.id },
+          data: { status: 'OFFLINE', onAirSince: null },
+        });
         wsService.emitChannelStatus(channel.id, 'OFFLINE');
         return;
       }
