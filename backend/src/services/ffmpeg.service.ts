@@ -576,7 +576,7 @@ class FfmpegService {
 
   private async triggerReconnect(
     channelId: string,
-    options?: { immediate?: boolean }
+    options?: { immediate?: boolean; transition?: 'BLUEPRINT_ROLL' }
   ): Promise<void> {
     const { hybridChannelService } = await import('./hybridChannel.service');
     if (await hybridChannelService.isLiveOverride(channelId)) {
@@ -619,8 +619,11 @@ class FfmpegService {
       return;
     }
 
+    const isBlueprintRoll = options?.transition === 'BLUEPRINT_ROLL';
     const attempts = this.reconnectAttempts.get(channelId) || 0;
-    this.reconnectAttempts.set(channelId, attempts + 1);
+    if (!isBlueprintRoll) {
+      this.reconnectAttempts.set(channelId, attempts + 1);
+    }
     const delay = options?.immediate
       ? 0
       : Math.min(
@@ -628,12 +631,20 @@ class FfmpegService {
           MAX_BACKOFF_MS
         );
 
-    await prisma.channel.update({ where: { id: channelId }, data: { status: 'ERROR' } });
-    wsService.emitChannelStatus(channelId, 'ERROR');
-    const label = attempts + 1 > channel.maxReconnectAttempts
-      ? `Reconnecting continuously (attempt ${attempts + 1})`
-      : `Reconnecting (${attempts + 1}/${channel.maxReconnectAttempts})`;
-    monitorService.addLog(channelId, 'WARN', `${label} in ${Math.round(delay / 1000)}s...`);
+    if (isBlueprintRoll) {
+      // Finite Blueprint windows ending at EOF is normal playout behavior.
+      // Preserve the ONLINE state while buffered HLS segments cover the
+      // immediate encoder handoff; this is not a reconnect failure.
+      this.reconnectAttempts.set(channelId, 0);
+      monitorService.addLog(channelId, 'INFO', 'Blueprint handoff — starting the next window now.');
+    } else {
+      await prisma.channel.update({ where: { id: channelId }, data: { status: 'ERROR' } });
+      wsService.emitChannelStatus(channelId, 'ERROR');
+      const label = attempts + 1 > channel.maxReconnectAttempts
+        ? `Reconnecting continuously (attempt ${attempts + 1})`
+        : `Reconnecting (${attempts + 1}/${channel.maxReconnectAttempts})`;
+      monitorService.addLog(channelId, 'WARN', `${label} in ${Math.round(delay / 1000)}s...`);
+    }
 
     const timer = setTimeout(async () => {
       this.reconnectTimers.delete(channelId);
@@ -1159,8 +1170,14 @@ class FfmpegService {
       }
       this.processes.delete(channel.id);
 
-      logger.warn(`Playlist FFmpeg for ${channel.name} exited (code ${code}).`);
-      monitorService.addLog(channel.id, 'WARN', `Playlist FFmpeg exited with code ${code}.`);
+      const cleanBlueprintRoll = playbackSource === 'BLUEPRINT' && !isLooping && code === 0;
+      if (cleanBlueprintRoll) {
+        logger.info(`Blueprint window for ${channel.name} completed normally.`);
+        monitorService.addLog(channel.id, 'INFO', 'Blueprint window completed normally.');
+      } else {
+        logger.warn(`Playlist FFmpeg for ${channel.name} exited (code ${code}).`);
+        monitorService.addLog(channel.id, 'WARN', `Playlist FFmpeg exited with code ${code}.`);
+      }
       if (playbackSource === 'BLUEPRINT' && code !== 0 && code !== null) {
         const { blueprintWindowAuditService } = await import('./blueprintWindowAudit.service');
         blueprintWindowAuditService.logChannelStartFailure(
@@ -1191,7 +1208,10 @@ class FfmpegService {
           // A clean EOF is the expected end of a finite Blueprint window.
           // Start its successor immediately; the existing HLS buffer covers
           // encoder startup and viewers continue using the same URL.
-          this.triggerReconnect(channel.id, { immediate: code === 0 });
+          this.triggerReconnect(channel.id, {
+            immediate: code === 0,
+            transition: code === 0 ? 'BLUEPRINT_ROLL' : undefined,
+          });
           return;
         }
         await prisma.channel.update({ where: { id: channel.id }, data: { status: 'OFFLINE' } });
