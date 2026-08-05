@@ -84,7 +84,14 @@ const shutdown = async () => {
   // Stop all FFmpeg streams
   const processes = ffmpegService.getAllProcesses();
   for (const [channelId] of processes) {
-    await ffmpegService.stopStream(channelId);
+    // A backend/container replacement is not an operator Stop. Keep the
+    // desired ONLINE state and logical on-air clock so startup recovery can
+    // resume the channel against the existing HLS buffer.
+    await ffmpegService.stopStream(channelId, {
+      preserveBlueprintRuntime: true,
+      preserveOnAirSession: true,
+      preserveDesiredState: true,
+    });
   }
   
   // Stop services

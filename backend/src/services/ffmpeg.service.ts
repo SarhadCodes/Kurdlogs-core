@@ -321,7 +321,10 @@ class FfmpegService {
         // A forced replacement is an internal handoff/recovery, not an
         // operator ending the broadcast. Keep the logical on-air session;
         // startStream will still reset it if the public HLS output is stale.
-        await this.stopStream(channel.id, { preserveOnAirSession: true });
+        await this.stopStream(channel.id, {
+          preserveOnAirSession: true,
+          preserveDesiredState: true,
+        });
         await this.killChannelPid(channel.id);
         await sleep(1000);
       }
@@ -442,7 +445,11 @@ class FfmpegService {
 
   public async stopStream(
     channelId: string,
-    options?: { preserveBlueprintRuntime?: boolean; preserveOnAirSession?: boolean }
+    options?: {
+      preserveBlueprintRuntime?: boolean;
+      preserveOnAirSession?: boolean;
+      preserveDesiredState?: boolean;
+    }
   ): Promise<void> {
     const processInfo = this.processes.get(channelId);
     if (processInfo) {
@@ -456,12 +463,14 @@ class FfmpegService {
         await prisma.channel.update({
           where: { id: channelId },
           data: {
-            status: 'OFFLINE',
+            status: options?.preserveDesiredState ? 'ONLINE' : 'OFFLINE',
             pid: null,
             ...(!options?.preserveOnAirSession ? { onAirSince: null } : {}),
           },
         });
-        wsService.emitChannelStatus(channelId, 'OFFLINE');
+        if (!options?.preserveDesiredState) {
+          wsService.emitChannelStatus(channelId, 'OFFLINE');
+        }
         return;
       }
 
@@ -484,12 +493,14 @@ class FfmpegService {
     await prisma.channel.update({
       where: { id: channelId },
       data: {
-        status: 'OFFLINE',
+        status: options?.preserveDesiredState ? 'ONLINE' : 'OFFLINE',
         pid: null,
         ...(!options?.preserveOnAirSession ? { onAirSince: null } : {}),
       },
     });
-    wsService.emitChannelStatus(channelId, 'OFFLINE');
+    if (!options?.preserveDesiredState) {
+      wsService.emitChannelStatus(channelId, 'OFFLINE');
+    }
   }
 
   /** Stop the active decoder without marking the channel offline (hybrid source handoff). */
@@ -517,7 +528,10 @@ class FfmpegService {
   public async restartStream(channelId: string, _legacyChannel?: any): Promise<void> {
     // Restart replaces the encoder but does not end the logical on-air
     // session while the existing HLS buffer remains playable.
-    await this.stopStream(channelId, { preserveOnAirSession: true });
+    await this.stopStream(channelId, {
+      preserveOnAirSession: true,
+      preserveDesiredState: true,
+    });
     await this.killChannelPid(channelId);
     await sleep(2000);
 
@@ -535,6 +549,7 @@ class FfmpegService {
     await this.stopStream(channelId, {
       preserveBlueprintRuntime: true,
       preserveOnAirSession: true,
+      preserveDesiredState: true,
     });
     await this.forceKill(channelId);
     await this.killChannelPid(channelId);
