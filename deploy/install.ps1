@@ -5,7 +5,7 @@
 param(
   [string]$InstallDir = $(Join-Path $env:LOCALAPPDATA 'KurdLogs-Core'),
   [string]$DistBase = 'https://kurdlogs-core.sarhadyt.workers.dev',
-  [string]$ImageTag = '1.2.53',
+  [string]$ImageTag = '1.2.54',
   [int]$HttpPort = 8081,
   [string]$InstallerVersion = '2026-08-07-v4-subdomains'
 )

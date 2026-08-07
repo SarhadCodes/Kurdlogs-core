@@ -4,6 +4,7 @@ import fs from 'fs';
 import { prisma } from '../config/database';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { appendConcatInputArgs } from '../utils/ffmpegConcatInput';
 import { FfmpegProcessInfo, StreamStats } from '../types';
 import { parseFfmpegProgress, sleep } from '../utils/helpers';
 import { wsService } from './websocket.service';
@@ -975,7 +976,7 @@ class FfmpegService {
     }
   ): Promise<void> {
     const isLooping = channel.useBlueprint
-      ? false
+      ? true
       : (channel.playlist?.isLooping ?? false);
     let concatPath: string;
     let playbackSource: 'BLUEPRINT' | 'PLAYLIST';
@@ -1077,14 +1078,10 @@ class FfmpegService {
     const args: string[] = [];
     gpuEncoderService.prependDeviceArgs(args, encoder);
     args.push(...this.getInputCustomArgs(channel));
-    args.push(
-      '-re',
-      '-fflags', '+genpts+igndts+discardcorrupt',
-      '-thread_queue_size', '2048',
-      '-f', 'concat',
-      '-safe', '0',
-      '-i', concatPath
-    );
+    // Blueprint manifests contain a complete seven-day playout schedule.
+    // Loop the concat demuxer inside the same FFmpeg process; reaching the end
+    // must not close the encoder, end the HLS playlist, or reset on-air uptime.
+    appendConcatInputArgs(args, concatPath, { loop: playbackSource === 'BLUEPRINT' });
 
     const runtimeOverlays = await this.getRuntimeOverlays(channel);
     const playlistOverlays = overlayService.getPlaylistStreamOverlays(runtimeOverlays);
@@ -1183,6 +1180,13 @@ class FfmpegService {
 
     logger.info(`Starting ${sourceLabel} FFmpeg (${encoder.codec}, concat, ${variant}) for ${channel.name}`);
     monitorService.addLog(channel.id, 'INFO', `Playback source: ${sourceLabel}`);
+    if (playbackSource === 'BLUEPRINT') {
+      monitorService.addLog(
+        channel.id,
+        'INFO',
+        'Continuous Blueprint playout enabled — the weekly schedule loops without restarting the channel.'
+      );
+    }
     monitorService.addLog(channel.id, 'INFO', `Video encoder: ${encoder.label} (${encoder.codec})`);
 
     const mainProcess = spawn(env.FFMPEG_PATH, args);

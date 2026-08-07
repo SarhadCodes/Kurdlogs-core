@@ -7,7 +7,11 @@ import { blueprintService } from './blueprint.service';
 import { blueprintWindowAuditService } from './blueprintWindowAudit.service';
 import { blueprintExecutionService } from './blueprintExecution.service';
 import { migrateCursorState } from './blueprintStateMigration';
-import type { BlueprintBlock, BlueprintRuntimeState, ResolvedSegment } from '../types/blueprint.types';
+import type {
+  BlueprintBlock,
+  BlueprintRuntimeState,
+  ResolvedSegment,
+} from '../types/blueprint.types';
 import { probeMediaDurationSec } from './mediaProbe.service';
 import {
   getActivePlaybackTimeSec,
@@ -166,7 +170,13 @@ export interface ChannelWindowBuild {
 }
 
 class BlueprintPlaybackService {
-  private readonly windowSize = 24;
+  /**
+   * Compile a full weekly schedule for the live encoder. FFmpeg loops this
+   * manifest internally, so normal end-of-schedule playback never closes the
+   * encoder or interrupts HLS. Explicit operator publishes can still replace
+   * the schedule in a controlled handoff.
+   */
+  private readonly playoutHorizon = '7d' as const;
   private readonly runtimes = new Map<string, BlueprintPlaybackRuntime>();
   private readonly lastCursorPersist = new Map<string, number>();
 
@@ -752,17 +762,31 @@ class BlueprintPlaybackService {
           (prev!.segments[0] ? new Date(prev!.segments[0].startsAt).getTime() : scheduleCursorMs)
         : scheduleCursorMs;
 
-    const { segments, state: engineState } = blueprintExecutionService.execute({
+    const simulation = blueprintExecutionService.simulateHorizon({
       blocks,
       playlists,
-      count: this.windowSize,
+      horizon: this.playoutHorizon,
       startTime: new Date(executeStartMs),
       initialState,
       seed: executionSeed,
       source: 'ENGINE',
     });
+    const segments = simulation.segments;
 
     if (segments.length === 0) return null;
+
+    // simulateHorizon intentionally over-generates then trims at the time
+    // boundary. Re-run only the retained count so the persisted cursor points
+    // at the exact last on-air item rather than the discarded look-ahead.
+    const { state: engineState } = blueprintExecutionService.execute({
+      blocks,
+      playlists,
+      count: segments.length,
+      startTime: new Date(executeStartMs),
+      initialState,
+      seed: executionSeed,
+      source: 'ENGINE',
+    });
 
     const lastEndMs = new Date(segments[segments.length - 1].endsAt).getTime();
     scheduleCursorMs = lastEndMs;
@@ -771,6 +795,7 @@ class BlueprintPlaybackService {
     let content = 'ffconcat version 1.0\n';
     const concatEntries: string[] = [];
     const compatibility = new Map<string, boolean>();
+    const durations = new Map<string, number | null>();
     const { ingestService } = await import('./ingest.service');
 
     for (const seg of segments) {
@@ -803,7 +828,13 @@ class BlueprintPlaybackService {
         }
         continue;
       }
-      const probed = await probeMediaDurationSec(item.videoPath);
+      let probed: number | null;
+      if (durations.has(item.videoPath)) {
+        probed = durations.get(item.videoPath) ?? null;
+      } else {
+        probed = (await probeMediaDurationSec(item.videoPath)) ?? null;
+        durations.set(item.videoPath, probed);
+      }
       const playbackDurationSec = probed ?? item.durationSec ?? seg.durationSec;
       const safePath = item.videoPath.replace(/\\/g, '/').replace(/'/g, "'\\''");
       content += `file '${safePath}'\n`;
