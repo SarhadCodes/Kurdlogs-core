@@ -63,6 +63,8 @@ export const env = {
   MCR_FADE_DURATION_MS: parseInt(process.env.MCR_FADE_DURATION_MS || '500', 10),
   MCR_ARCHITECTURE: (process.env.MCR_ARCHITECTURE || 'v2-switcher').toLowerCase(),
   NORMALIZE_PRESET: process.env.NORMALIZE_PRESET || 'ultrafast',
+  /** Bound FFmpeg worker pools so multiple CPU channels do not oversubscribe the host scheduler. */
+  FFMPEG_CPU_THREADS: Math.max(1, Math.min(8, parseInt(process.env.FFMPEG_CPU_THREADS || '2', 10) || 2)),
   GRAPHICS_ENGINE_ENABLED: process.env.GRAPHICS_ENGINE_ENABLED === 'true',
   GRAPHICS_MAX_ASSET_MB: parseInt(process.env.GRAPHICS_MAX_ASSET_MB || '10', 10),
 };

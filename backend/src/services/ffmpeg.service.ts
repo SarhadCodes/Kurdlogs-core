@@ -1081,7 +1081,10 @@ class FfmpegService {
     // Blueprint manifests contain a complete seven-day playout schedule.
     // Loop the concat demuxer inside the same FFmpeg process; reaching the end
     // must not close the encoder, end the HLS playlist, or reset on-air uptime.
-    appendConcatInputArgs(args, concatPath, { loop: playbackSource === 'BLUEPRINT' });
+    appendConcatInputArgs(args, concatPath, {
+      loop: playbackSource === 'BLUEPRINT',
+      decoderThreads: encoder.codec === 'libx264' ? env.FFMPEG_CPU_THREADS : undefined,
+    });
 
     const runtimeOverlays = await this.getRuntimeOverlays(channel);
     const playlistOverlays = overlayService.getPlaylistStreamOverlays(runtimeOverlays);
@@ -1134,7 +1137,14 @@ class FfmpegService {
     // that graph at MP4 boundaries and can reset audio DTS to zero, stalling
     // HLS until the watchdog intervenes. Canonical inputs plus the AAC output
     // encoder below preserve one continuous timestamp timeline.
-    args.push('-filter_complex', playlistMaps.filterComplex);
+    // Auto-sized filter pools multiply across channels. Cap them alongside
+    // decoder and x264 threads so a 6-vCPU host stays at realtime speed.
+    args.push(
+      '-filter_complex_threads',
+      String(env.FFMPEG_CPU_THREADS),
+      '-filter_complex',
+      playlistMaps.filterComplex
+    );
 
     this.appendPlaylistStreamOutputs(
       args,

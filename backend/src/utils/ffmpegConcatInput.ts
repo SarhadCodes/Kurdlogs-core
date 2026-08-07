@@ -1,5 +1,6 @@
 export interface ConcatInputOptions {
   loop: boolean;
+  decoderThreads?: number;
 }
 
 /** Add the canonical realtime concat input used by playlist playout. */
@@ -15,6 +16,7 @@ export function appendConcatInputArgs(
     '-re',
     '-fflags', '+genpts+igndts+discardcorrupt',
     '-thread_queue_size', '2048',
+    ...(options.decoderThreads ? ['-threads', String(options.decoderThreads)] : []),
     '-f', 'concat',
     '-safe', '0',
     '-i', concatPath

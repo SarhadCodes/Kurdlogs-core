@@ -67,6 +67,8 @@ class McrSlateService {
       'libx264',
       '-preset',
       'ultrafast',
+      '-threads:v',
+      '1',
       '-tune',
       'stillimage',
       '-pix_fmt',
