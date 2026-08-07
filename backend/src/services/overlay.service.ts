@@ -124,8 +124,10 @@ class OverlayService {
     for (const overlay of this.getActiveOverlays(overlays)) {
       if (overlay.type === 'LOGO' || overlay.type === 'WATERMARK') {
         const imagePath = this.getImagePath(overlay.config);
-        // Loop static images for the full stream duration (required for overlay filter).
-        inputs.push('-loop', '1', '-framerate', '24', '-i', imagePath);
+        // A logo is static: decode it once per second and let the overlay filter
+        // repeat the frame. Decoding the same PNG at program frame rate wastes
+        // CPU and auto-creates another large worker pool per live channel.
+        inputs.push('-loop', '1', '-framerate', '1', '-threads', '1', '-i', imagePath);
       }
     }
     return inputs;
