@@ -1,4 +1,5 @@
 import type { User } from '../types';
+import { resolvePublicUploadUrl } from '../config/runtime';
 
 export function userDisplayName(user: Pick<User, 'username' | 'displayName'> | null | undefined): string {
   const name = user?.displayName?.trim();
@@ -17,8 +18,5 @@ export function userInitials(user: Pick<User, 'username' | 'displayName'> | null
 
 export function resolveAvatarUrl(avatarUrl?: string | null): string | null {
   if (!avatarUrl) return null;
-  if (avatarUrl.startsWith('http://') || avatarUrl.startsWith('https://') || avatarUrl.startsWith('/')) {
-    return avatarUrl;
-  }
-  return `/uploads/${avatarUrl.replace(/^uploads\//, '')}`;
+  return resolvePublicUploadUrl(avatarUrl);
 }

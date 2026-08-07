@@ -5,6 +5,7 @@ import { hybridApi, playlistApi, type HybridChannelSnapshot } from '../services/
 import { wsService } from '../services/websocket';
 import type { Playlist, PlaylistItem } from '../types';
 import LoadingSpinner from './LoadingSpinner';
+import { getPublicStreamBaseUrl } from '../config/runtime';
 
 interface HybridChannelPanelProps {
   channelId: string;
@@ -205,7 +206,7 @@ export default function HybridChannelPanel({ channelId, channelSlug, isOnline }:
             Hybrid Channel
           </h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Viewer URL stays <span className="font-mono text-gray-400">/stream/{channelSlug}/master.m3u8</span>
+            Viewer URL stays <span className="font-mono text-gray-400">{getPublicStreamBaseUrl()}/{channelSlug}/master.m3u8</span>
           </p>
           <p className="mt-1 text-xs text-emerald-300/80">
             The next source is buffered before it is taken on air; viewers keep the same stream URL.

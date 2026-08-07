@@ -2,7 +2,7 @@ import { prisma } from '../config/database';
 import { generateToken } from '../utils/helpers';
 import cron from 'node-cron';
 import { env } from '../config/env';
-import { getPublicBaseUrl } from '../config/publicUrl';
+import { getPublicStreamBaseUrl } from '../config/publicUrl';
 import { logger } from '../utils/logger';
 import { AppError } from '../middleware/errorHandler';
 import {
@@ -165,7 +165,7 @@ class TokenService {
   }
 
   buildStablePlayUrl(slug: string, manifest: string): string {
-    return buildStableStreamPlayUrl(getPublicBaseUrl(), slug, manifest, env.IPTV_API_KEY);
+    return buildStableStreamPlayUrl(getPublicStreamBaseUrl(), slug, manifest, env.IPTV_API_KEY);
   }
 
   async getIptvPlayInfo(channel: { id: string; slug: string; name: string; outputType?: string }): Promise<IptvPlayInfo | null> {
@@ -186,8 +186,8 @@ class TokenService {
       expiresAt: record.expiresAt.toISOString(),
       refreshInSeconds,
       overlapSeconds: env.TOKEN_OVERLAP_SECONDS,
-      hlsUrl: buildTokenStreamUrl(getPublicBaseUrl(), channel.slug, record.token, 'index.m3u8'),
-      dashUrl: buildTokenStreamUrl(getPublicBaseUrl(), channel.slug, record.token, 'manifest.mpd'),
+      hlsUrl: buildTokenStreamUrl(getPublicStreamBaseUrl(), channel.slug, record.token, 'index.m3u8'),
+      dashUrl: buildTokenStreamUrl(getPublicStreamBaseUrl(), channel.slug, record.token, 'manifest.mpd'),
       stableHlsUrl: this.buildStablePlayUrl(channel.slug, 'index.m3u8'),
       stableDashUrl: this.buildStablePlayUrl(channel.slug, 'manifest.mpd'),
     };

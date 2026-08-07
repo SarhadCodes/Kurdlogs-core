@@ -4,7 +4,14 @@ import { monitorService } from '../services/monitor.service';
 import { tokenService } from '../services/token.service';
 import { env } from '../config/env';
 import { buildMcrInternalIngestUrl } from '../config/mcrRtmp';
-import { getPublicBaseUrl, publicHostFromBase, resolveRequestBaseUrl } from '../config/publicUrl';
+import {
+  getApiBaseUrl,
+  getAppBaseUrl,
+  getCdnBaseUrl,
+  getPublicStreamBaseUrl,
+  publicHostFromBase,
+  resolveRequestBaseUrl,
+} from '../config/publicUrl';
 import { getPublishedHlsManifest, hasRecentHlsSegments } from '../utils/streamPaths';
 import { buildPublicStreamUrl, buildTokenStreamUrl } from '../utils/streamUrls';
 import { ffmpegService } from '../services/ffmpeg.service';
@@ -94,8 +101,12 @@ function ingestHostFromBase(base: string): string {
 /** Playback URLs for VLC / IPTV apps (admin). Uses request Host so VLC on same machine works. */
 export const getChannelPlayUrls = async (req: Request, res: Response) => {
   const channel = await channelService.getChannelById(String(req.params.id));
-  const base = requestBaseUrl(req);
-  const ingestHost = ingestHostFromBase(base);
+  const requestBase = requestBaseUrl(req);
+  const apiBase = getApiBaseUrl() || requestBase;
+  const appBase = getAppBaseUrl();
+  const cdnBase = getCdnBaseUrl();
+  const streamBase = getPublicStreamBaseUrl();
+  const ingestHost = ingestHostFromBase(apiBase);
   const tokenProtected = await tokenService.hasActiveTokens(channel.id);
   const play = await tokenService.getIptvPlayInfo(channel);
   const slug = channel.slug;
@@ -108,7 +119,11 @@ export const getChannelPlayUrls = async (req: Request, res: Response) => {
   res.json({
     success: true,
     data: {
-      baseUrl: base,
+      baseUrl: cdnBase,
+      appUrl: appBase,
+      apiUrl: apiBase,
+      cdnUrl: cdnBase,
+      streamBaseUrl: streamBase,
       slug,
       status: channel.status,
       tokenProtected,
@@ -117,15 +132,15 @@ export const getChannelPlayUrls = async (req: Request, res: Response) => {
       hlsManifest: hls,
       play,
       urls: {
-        publicHls: buildPublicStreamUrl(base, slug, hls),
-        publicDash: buildPublicStreamUrl(base, slug, dash),
-        hlsWithToken: play ? buildTokenStreamUrl(base, slug, play.token, hls) : null,
-        dashWithToken: play ? buildTokenStreamUrl(base, slug, play.token, dash) : null,
+        publicHls: buildPublicStreamUrl(streamBase, slug, hls),
+        publicDash: buildPublicStreamUrl(streamBase, slug, dash),
+        hlsWithToken: play ? buildTokenStreamUrl(streamBase, slug, play.token, hls) : null,
+        dashWithToken: play ? buildTokenStreamUrl(streamBase, slug, play.token, dash) : null,
         stableHls: play
-          ? `${base}/stream/play/${slug}/${hls}?api_key=${encodeURIComponent(env.IPTV_API_KEY)}`
+          ? `${streamBase}/play/${slug}/${hls}?api_key=${encodeURIComponent(env.IPTV_API_KEY)}`
           : null,
         stableDash: play
-          ? `${base}/stream/play/${slug}/${dash}?api_key=${encodeURIComponent(env.IPTV_API_KEY)}`
+          ? `${streamBase}/play/${slug}/${dash}?api_key=${encodeURIComponent(env.IPTV_API_KEY)}`
           : null,
       },
       ingest: {

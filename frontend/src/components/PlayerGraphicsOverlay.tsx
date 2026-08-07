@@ -1,11 +1,10 @@
 import type { ChannelGraphics } from '../types';
+import { resolvePublicUploadUrl } from '../config/runtime';
 
 const number = (value: unknown, fallback: number) => typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 
 function publicAssetUrl(path: string): string {
-  const normalized = path.replace(/\\/g, '/');
-  const at = normalized.lastIndexOf('/uploads/');
-  return at >= 0 ? normalized.slice(at) : normalized;
+  return resolvePublicUploadUrl(path);
 }
 
 /** Browser-only scene preview for controlled KurdLogs players. */

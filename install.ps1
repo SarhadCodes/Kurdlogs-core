@@ -5,7 +5,7 @@
 param(
   [string]$InstallDir = $(Join-Path $env:LOCALAPPDATA 'KurdLogs-Core'),
   [string]$DistBase = 'https://kurdlogs-core.sarhadyt.workers.dev',
-  [string]$ImageTag = '1.2.14',
+  [string]$ImageTag = '1.2.53',
   [int]$HttpPort = 8081
 )
 
@@ -164,12 +164,18 @@ if (-not (Test-Path $envPath)) {
   $utf8NoBom = New-Object System.Text.UTF8Encoding $false
   $envBody = @"
 PUBLIC_BASE_URL=http://localhost:$HttpPort
+KURDLOGS_PUBLIC_SITE_URL=
+KURDLOGS_APP_URL=
+KURDLOGS_API_URL=
+KURDLOGS_CDN_URL=
 CORS_ORIGIN=http://localhost:$HttpPort,http://localhost
 JWT_SECRET=$jwt
 ADMIN_INITIAL_PASSWORD=$adminPasswordShown
 IPTV_API_KEY=$api
 POSTGRES_PASSWORD=$pg
+COOKIE_SECURE=false
 HTTP_PORT=$HttpPort
+PANEL_BIND_HOST=0.0.0.0
 RTMP_PUBLISH_PORT=1936
 MCR_RTMP_PORT=1936
 TOKEN_OVERLAP_SECONDS=120

@@ -1,5 +1,6 @@
 import { forwardRef, useImperativeHandle, useRef, useEffect, useState, useCallback, type ReactNode } from 'react';
 import Hls from 'hls.js';
+import { isApiRequestUrl } from '../config/runtime';
 import * as dashjs from 'dashjs';
 import { Copy, ExternalLink, WifiOff } from 'lucide-react';
 import { useViewerHeartbeat } from '../hooks/useViewerHeartbeat';
@@ -266,6 +267,12 @@ const LivePlayer = forwardRef<LivePlayerHandle, LivePlayerProps>(function LivePl
       const manifestUrl = appendStreamAuthToUrl(src, auth);
       const player = dashjs.MediaPlayer().create();
 
+      if (isApiRequestUrl(manifestUrl)) {
+        player.setXHRWithCredentialsForType('MPD', true);
+        player.setXHRWithCredentialsForType('MediaSegment', true);
+        player.setXHRWithCredentialsForType('InitializationSegment', true);
+      }
+
       if (auth.streamToken || auth.accessToken) {
         player.addRequestInterceptor((request) => {
           request.url = appendStreamAuthToUrl(request.url, auth);
@@ -335,7 +342,8 @@ const LivePlayer = forwardRef<LivePlayerHandle, LivePlayerProps>(function LivePl
           xhrSetup: (xhr, url) => {
             const authedUrl = appendStreamAuthToUrl(url, auth);
             const reqUrl = new URL(authedUrl, window.location.origin);
-            xhr.open('GET', reqUrl.pathname + reqUrl.search, true);
+            xhr.open('GET', reqUrl.toString(), true);
+            xhr.withCredentials = isApiRequestUrl(reqUrl.toString());
           },
         });
 

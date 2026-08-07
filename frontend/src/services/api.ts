@@ -16,6 +16,7 @@ import {
   StorageReport,
 } from '../types';
 import type { ChannelPlayUrlsData } from '../utils/channelOutputs';
+import { getApiBaseUrl } from '../config/runtime';
 
 export type SecondaryUser = {
   id: string;
@@ -26,7 +27,7 @@ export type SecondaryUser = {
 };
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: getApiBaseUrl(),
   timeout: 30_000,
   withCredentials: true,
 });

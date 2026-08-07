@@ -1,5 +1,6 @@
 import type { PlayerEngine } from '../types/player';
 import { getOrCreateViewerSessionId } from './viewerSession';
+import { getAdminStreamBaseUrl, getPublicStreamBaseUrl } from '../config/runtime';
 
 /** Manifest file used in the preview player for each engine mode. */
 export function getPreviewManifestForEngine(engine: PlayerEngine): string {
@@ -24,18 +25,18 @@ export function buildStreamUrl(
   const vsidSuffix = vsid ? `?vsid=${encodeURIComponent(vsid)}` : '';
 
   if (streamToken) {
-    const base = `/stream/${slug}/t/${encodeURIComponent(streamToken)}/${manifest}`;
+    const base = `${getPublicStreamBaseUrl()}/${slug}/t/${encodeURIComponent(streamToken)}/${manifest}`;
     return vsid ? `${base}?vsid=${encodeURIComponent(vsid)}` : base;
   }
-  // Admin preview uses httpOnly session cookie (same-origin) — never put JWT in the URL.
-  return `/stream/${slug}/${manifest}${vsidSuffix}`;
+  // Admin preview uses the API host's httpOnly cookie — never put JWT in the URL.
+  return `${getAdminStreamBaseUrl()}/${slug}/${manifest}${vsidSuffix}`;
 }
 
 export function buildTokenStreamUrl(
-  base: string,
+  streamBase: string,
   slug: string,
   token: string,
   manifest = 'master.m3u8'
 ): string {
-  return `${base}/stream/${slug}/t/${encodeURIComponent(token)}/${manifest}`;
+  return `${streamBase}/${slug}/t/${encodeURIComponent(token)}/${manifest}`;
 }

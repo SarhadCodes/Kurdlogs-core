@@ -5,6 +5,7 @@ import { graphicsApi } from '../services/api';
 import type { ChannelGraphics, GraphicsAsset, GraphicsMode } from '../types';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
+import { resolvePublicUploadUrl } from '../config/runtime';
 
 const CANVAS = { width: 1280, height: 720, frameRate: 24 };
 // `crypto.randomUUID` is unavailable in some HTTP/browser combinations.
@@ -27,9 +28,7 @@ const renderedLogoSize = (layout: Pick<LogoLayout, 'width' | 'height'>, aspectRa
 
 function publicAssetUrl(asset?: GraphicsAsset | null): string | null {
   if (!asset) return null;
-  const normalized = asset.path.replace(/\\/g, '/');
-  const at = normalized.lastIndexOf('/uploads/');
-  return at >= 0 ? normalized.slice(at) : normalized;
+  return resolvePublicUploadUrl(asset.path);
 }
 
 export default function ChannelGraphicsPanel({ channelId }: { channelId: string }) {

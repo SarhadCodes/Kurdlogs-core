@@ -40,11 +40,16 @@ services:
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
       PORT: 3001
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8081,http://localhost,${PUBLIC_BASE_URL:-http://localhost:8081}}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       FFMPEG_PATH: ffmpeg
       STREAMS_DIR: /var/streams
       UPLOADS_DIR: /var/uploads
       NGINX_HLS_URL: http://nginx-rtmp:8080/hls
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8081}
+      KURDLOGS_PUBLIC_SITE_URL: ${KURDLOGS_PUBLIC_SITE_URL:-}
+      KURDLOGS_APP_URL: ${KURDLOGS_APP_URL:-}
+      KURDLOGS_API_URL: ${KURDLOGS_API_URL:-}
+      KURDLOGS_CDN_URL: ${KURDLOGS_CDN_URL:-}
       HTTP_PORT: ${HTTP_PORT:-8081}
       RTMP_PUBLISH_PORT: ${RTMP_PUBLISH_PORT:-1936}
       MCR_RTMP_PORT: ${MCR_RTMP_PORT:-1936}
@@ -87,7 +92,12 @@ services:
       dockerfile: docker/frontend.Dockerfile
     ports:
       # Default 8081 — port 80 is often taken by Flussonic/nginx on VPS hosts
-      - "${HTTP_PORT:-8081}:80"
+      - "${PANEL_BIND_HOST:-0.0.0.0}:${HTTP_PORT:-8081}:80"
+    environment:
+      KURDLOGS_PUBLIC_SITE_URL: ${KURDLOGS_PUBLIC_SITE_URL:-}
+      KURDLOGS_APP_URL: ${KURDLOGS_APP_URL:-}
+      KURDLOGS_API_URL: ${KURDLOGS_API_URL:-}
+      KURDLOGS_CDN_URL: ${KURDLOGS_CDN_URL:-}
     depends_on:
       - backend
     restart: unless-stopped

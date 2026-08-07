@@ -1,4 +1,5 @@
 import { io, Socket } from 'socket.io-client';
+import { getSocketOrigin } from '../config/runtime';
 
 class WebSocketService {
   private socket: Socket | null = null;
@@ -8,7 +9,7 @@ class WebSocketService {
   connect() {
     if (this.socket?.connected) return;
 
-    this.socket = io('/', {
+    this.socket = io(getSocketOrigin(), {
       withCredentials: true,
       path: '/socket.io',
       transports: ['websocket', 'polling'],
