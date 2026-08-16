@@ -36,12 +36,14 @@ class GraphicsBurnInService {
       // broadcast graphic while preserving its default ingest-time branding rule.
       isGraphicsOverlay: true,
       config: {
-        path: graphicsAssetService.getBroadcastAssetPath(graphics.scene.asset),
+        // Pre-compose opacity into the cached logo asset. This leaves the
+        // long-running FFmpeg program graph with only scale + overlay work.
+        path: graphicsAssetService.getBroadcastAssetPath(graphics.scene.asset, node.opacity),
         x: node.x,
         y: node.y,
         width: node.width,
         height: node.height,
-        opacity: node.opacity,
+        opacity: 1,
       },
     };
   }

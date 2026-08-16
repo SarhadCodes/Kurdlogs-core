@@ -44,10 +44,18 @@ class GraphicsAssetService {
    * derivative once so a phone-sized or camera-sized source image is never
    * decoded and scaled 24 times per second by the live encoder.
    */
-  getBroadcastAssetPath(asset: { path: string; sha256: string; mimeType: string }): string {
+  getBroadcastAssetPath(
+    asset: { path: string; sha256: string; mimeType: string },
+    opacity = 1,
+  ): string {
     if (asset.mimeType === 'image/svg+xml') return asset.path;
+    const alpha = Math.min(1, Math.max(0, Number(opacity) || 0));
     const cacheDir = path.join(env.UPLOADS_DIR, 'graphics-cache');
-    const cachePath = path.join(cacheDir, `${asset.sha256}-400.png`);
+    // Apply scene opacity once while creating the cached raster. Applying
+    // colorchannelmixer in the live graph costs a full-frame alpha pass for
+    // every program frame, even though the logo never changes.
+    const opacityKey = Math.round(alpha * 1000);
+    const cachePath = path.join(cacheDir, `${asset.sha256}-400-a${opacityKey}.png`);
     if (fs.existsSync(cachePath)) return cachePath;
 
     fs.mkdirSync(cacheDir, { recursive: true });
@@ -57,7 +65,9 @@ class GraphicsAssetService {
       [
         '-y', '-v', 'error', '-i', asset.path,
         '-frames:v', '1',
-        '-vf', 'scale=400:400:force_original_aspect_ratio=decrease',
+        '-vf', alpha < 1
+          ? `scale=400:400:force_original_aspect_ratio=decrease,format=rgba,colorchannelmixer=aa=${alpha.toFixed(3)}`
+          : 'scale=400:400:force_original_aspect_ratio=decrease',
         '-pix_fmt', 'rgba',
         tempPath,
       ],

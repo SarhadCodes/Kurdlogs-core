@@ -181,7 +181,12 @@ class IngestService {
       '-r', String(PLAYLIST_FPS),
       '-g', String(PLAYLIST_FPS * 6),
       '-keyint_min', String(PLAYLIST_FPS * 6),
-      ...(codecMode === 'avc1' ? ['-tag:v', 'avc1', '-profile:v', 'main', '-level', '4.0'] : []),
+      // Keep all normalized program assets in a decode-friendly H.264
+      // profile. The legacy path previously defaulted to High Profile, which
+      // is needlessly expensive for the two-channel CPU playout host.
+      '-tag:v', 'avc1',
+      '-profile:v', 'main',
+      '-level', '4.0',
       '-crf', '26',
       '-c:a', 'aac',
       '-b:a', '128k',
@@ -339,7 +344,7 @@ class IngestService {
       itemId,
       sourcePath,
       playlistId,
-      codecMode = 'legacy',
+      codecMode = 'avc1',
       jobType = 'INGEST',
       skipBrand = false,
     } = options;
