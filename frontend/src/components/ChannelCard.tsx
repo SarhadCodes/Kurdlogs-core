@@ -26,7 +26,11 @@ const statusConfig: Record<ChannelStatus, { dot: string; bg: string; label: stri
 function getHealth(stats: StreamStats | null, status: ChannelStatus): { label: string; color: string } {
   if (status !== 'ONLINE' || !stats) return { label: 'N/A', color: 'text-gray-500' };
   const speed = parseFloat(stats.speed) || 0;
-  if (speed >= 0.95 && stats.fps > 0) return { label: 'Excellent', color: 'text-green-400' };
+  // FFmpeg reports a rounded instantaneous speed. A sustained 0.94x+ stream
+  // at the target frame cadence remains within the live HLS buffer and is
+  // operationally healthy; reserving Excellent for 0.95 exactly made healthy
+  // CPU channels oscillate between Excellent and Good on measurement noise.
+  if (speed >= 0.94 && stats.fps > 0) return { label: 'Excellent', color: 'text-green-400' };
   if (speed >= 0.8) return { label: 'Good', color: 'text-blue-400' };
   if (speed >= 0.5) return { label: 'Fair', color: 'text-yellow-400' };
   return { label: 'Poor', color: 'text-red-400' };
