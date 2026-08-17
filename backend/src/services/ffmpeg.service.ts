@@ -1142,7 +1142,8 @@ class FfmpegService {
       channel,
       encoder.pixelFormat,
       graphicsCanvas,
-      blueprintSourceIsCanonical
+      blueprintSourceIsCanonical,
+      this.getPlaylistOutputFps(channel)
     );
     // Do not put concat audio through a stateful filter graph. FFmpeg rebuilds
     // that graph at MP4 boundaries and can reset audio DTS to zero, stalling
@@ -1168,6 +1169,7 @@ class FfmpegService {
       {
         continueAppend,
         listSize: options?.prewarm ? 6 : undefined,
+        outputFps: this.getPlaylistOutputFps(channel),
         // Blueprint is a live channel too. An EVENT playlist grows forever,
         // eventually forcing players to scan thousands of stale segments and
         // exhausting disk space. Reserve it for the short-lived prewarm job.
@@ -1461,13 +1463,25 @@ class FfmpegService {
     }
   }
 
+  /**
+   * Playlist playout is normalized at 24 fps, but a channel can deliberately
+   * use a lower output cadence on a CPU-constrained host. Never allow a
+   * profile to make this software playout path more expensive than 24 fps.
+   */
+  private getPlaylistOutputFps(channel: any): number {
+    const configured = Number(channel.transcodingProfile?.fps);
+    if (!Number.isFinite(configured) || configured <= 0) return 24;
+    return Math.max(12, Math.min(24, Math.round(configured)));
+  }
+
   /** One HLS rung for playlist channels (stable with overlays on CPU VPS). */
   private preparePlaylistVideoMap(
     filterComplex: string | null,
     channel: any,
     pixelFormat: 'yuv420p' | 'nv12' = 'yuv420p',
     normalizeBeforeOverlays = false,
-    sourceAlreadyCanonical = false
+    sourceAlreadyCanonical = false,
+    outputFps = 24
   ): { filterComplex: string; videoOut: string } {
     const { width, height } = this.getPlaylistOutputDimensions(channel);
     // A published Blueprint contains only 1280x720, 24 fps canonical media.
@@ -1483,9 +1497,9 @@ class FfmpegService {
         : '[0:v]';
     const prefix = [normalize, filterComplex].filter(Boolean).join(';');
     const outputFilter = normalizeBeforeOverlays
-      ? `${base}format=${pixelFormat},fps=24[vout]`
+      ? `${base}format=${pixelFormat},fps=${outputFps}[vout]`
       : `${base}scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=${pixelFormat},fps=24[vout]`;
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=${pixelFormat},fps=${outputFps}[vout]`;
     return {
       filterComplex: `${prefix ? `${prefix};` : ''}${outputFilter}`,
       videoOut: '[vout]',
@@ -1538,7 +1552,7 @@ class FfmpegService {
     audioMap: string,
     encoder = gpuEncoderService.resolveForChannel(channel),
     startNumber?: number,
-    hlsOptions?: { continueAppend?: boolean; listSize?: number; eventPlaylist?: boolean }
+    hlsOptions?: { continueAppend?: boolean; listSize?: number; eventPlaylist?: boolean; outputFps?: number }
   ): void {
     const { variant } = this.getPlaylistOutputDimensions(channel);
     const bitrate =
@@ -1561,7 +1575,8 @@ class FfmpegService {
       : 'append_list+independent_segments+program_date_time+delete_segments+temp_file+discont_start';
 
     args.push('-map', videoOut, '-map', audioMap);
-    gpuEncoderService.appendVideoEncodeArgs(args, encoder, bitrate, HLS_GOP_FRAMES);
+    const outputFps = hlsOptions?.outputFps ?? 24;
+    gpuEncoderService.appendVideoEncodeArgs(args, encoder, bitrate, outputFps * HLS_SEGMENT_SECONDS);
     args.push(
       '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
       '-max_muxing_queue_size', '2048',
