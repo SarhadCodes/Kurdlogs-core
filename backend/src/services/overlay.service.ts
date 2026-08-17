@@ -235,8 +235,12 @@ class OverlayService {
         // output alive after the primary program input reaches EOF. With
         // shortest=0 FFmpeg repeated the program's final frame forever while
         // the logo continued, producing fresh-but-frozen HLS segments.
+        // Keep the program in YUV. `format=auto` promotes every 720p program
+        // frame to RGBA for a small static logo, which is needlessly costly on
+        // a live CPU encoder. The RGBA logo input still retains its alpha while
+        // overlay converts only the compositing result to broadcast YUV420.
         parts.push(
-          `${currentInput}[${imgLabel}]overlay=${x}:${y}:format=auto:eof_action=repeat:shortest=1${scheduleEnable}${outputName}`
+          `${currentInput}[${imgLabel}]overlay=${x}:${y}:format=yuv420:eof_action=repeat:shortest=1${scheduleEnable}${outputName}`
         );
         imageInputIndex++;
       } else if (overlay.type === 'SCROLLING_TEXT') {
