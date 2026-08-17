@@ -151,12 +151,9 @@ server.listen(env.PORT, async () => {
      const { sourceRouterService } = await import('./services/sourceRouter.service');
      await sourceRouterService.migrateAllEnabledMcrChannels();
      await sourceRouterService.recoverRelaysOnStartup();
-     if (env.MCR_ARCHITECTURE === 'v2-switcher') {
-       const { mcrSlateService } = await import('./services/mcr/mcrSlate.service');
-       void mcrSlateService.ensureSlate().catch((err) =>
-         logger.warn(`[MCR_SLATE] startup ensure failed: ${err}`)
-       );
-     }
+     // The MCR slate is created lazily by the MCR input/encoder services when a
+     // switcher channel is actually enabled. Starting it here used a full CPU
+     // core encoding an unused 720p/30 black stream on Blueprint-only installs.
 
      const { mcrIngestService } = await import('./services/mcrIngest.service');
      mcrIngestService.startPoller();
