@@ -1126,13 +1126,24 @@ class FfmpegService {
     // program before applying that scene so a 4:3/cinematic source cannot
     // shift or stretch the placement seen in the graphics editor.
     const graphicsCanvas = playlistOverlays.some((overlay: any) => overlay.isGraphicsOverlay);
+    const outputDimensions = this.getPlaylistOutputDimensions(channel);
+    const blueprintSourceIsCanonical =
+      playbackSource === 'BLUEPRINT' &&
+      outputDimensions.width === 1280 &&
+      outputDimensions.height === 720;
     const filterComplex = await overlayService.buildFilterComplex(
       playlistOverlays,
-      graphicsCanvas ? '[graphicsCanvas]' : '[0:v]'
+      graphicsCanvas && !blueprintSourceIsCanonical ? '[graphicsCanvas]' : '[0:v]'
     );
     if (this.hasMissingImageOverlay({ ...channel, overlays: playlistOverlays }, filterComplex)) return;
 
-    const playlistMaps = this.preparePlaylistVideoMap(filterComplex, channel, encoder.pixelFormat, graphicsCanvas);
+    const playlistMaps = this.preparePlaylistVideoMap(
+      filterComplex,
+      channel,
+      encoder.pixelFormat,
+      graphicsCanvas,
+      blueprintSourceIsCanonical
+    );
     // Do not put concat audio through a stateful filter graph. FFmpeg rebuilds
     // that graph at MP4 boundaries and can reset audio DTS to zero, stalling
     // HLS until the watchdog intervenes. Canonical inputs plus the AAC output
@@ -1455,13 +1466,21 @@ class FfmpegService {
     filterComplex: string | null,
     channel: any,
     pixelFormat: 'yuv420p' | 'nv12' = 'yuv420p',
-    normalizeBeforeOverlays = false
+    normalizeBeforeOverlays = false,
+    sourceAlreadyCanonical = false
   ): { filterComplex: string; videoOut: string } {
     const { width, height } = this.getPlaylistOutputDimensions(channel);
-    const normalize = normalizeBeforeOverlays
+    // A published Blueprint contains only 1280x720, 24 fps canonical media.
+    // Do not scale/pad it once more before a graphics overlay: that redundant
+    // per-frame work steals real-time headroom from the software encoder.
+    const normalize = normalizeBeforeOverlays && !sourceAlreadyCanonical
       ? `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)[graphicsCanvas]`
       : '';
-    const base = filterComplex ? '[outv]' : normalizeBeforeOverlays ? '[graphicsCanvas]' : '[0:v]';
+    const base = filterComplex
+      ? '[outv]'
+      : normalizeBeforeOverlays && !sourceAlreadyCanonical
+        ? '[graphicsCanvas]'
+        : '[0:v]';
     const prefix = [normalize, filterComplex].filter(Boolean).join(';');
     const outputFilter = normalizeBeforeOverlays
       ? `${base}format=${pixelFormat},fps=24[vout]`
