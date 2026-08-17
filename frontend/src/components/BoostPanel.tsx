@@ -12,6 +12,7 @@ import {
   CircleDot,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
+import { getApiOrigin } from '../config/runtime';
 import { boostApi } from '../services/api';
 import type { BoostNode, BoostNodeStatus, BoostSummary } from '../types';
 import LoadingSpinner from './LoadingSpinner';
@@ -45,7 +46,7 @@ export default function BoostPanel() {
   const [formMaxChannels, setFormMaxChannels] = useState('4');
   const [formNotes, setFormNotes] = useState('');
 
-  const coreUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const coreUrl = getApiOrigin();
 
   const fetchNodes = async () => {
     try {

@@ -5,10 +5,14 @@ import { User } from '@prisma/client';
 export interface FfmpegProcessInfo {
   pid: number;
   channelId: string;
+  slug: string;
   process: ChildProcess;
   inputType: string;
   playbackSource?: 'BLUEPRINT' | 'PLAYLIST' | 'MCR_BUS' | 'MCR_SWITCHER';
+  /** Current FFmpeg child start, used for process-level health checks. */
   startTime: Date;
+  /** Logical broadcast session start, preserved across seamless encoder handoffs. */
+  sessionStartTime: Date;
   stats: StreamStats;
   lastProgressTime: number;
   markedOnline: boolean;
@@ -60,6 +64,8 @@ export enum WebSocketEvents {
   MCR_SOURCES = 'mcr:sources',
   MCR_SESSION_READY = 'mcr:session-ready',
   HYBRID_STATE = 'hybrid:state',
+  GRAPHICS_STATE = 'graphics:state',
+  GRAPHICS_COMMAND = 'graphics:command',
 }
 
 export interface ViewerLocation {

@@ -19,6 +19,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "5"
 
   backend:
     build:
@@ -35,11 +40,16 @@ services:
       ADMIN_INITIAL_PASSWORD: ${ADMIN_INITIAL_PASSWORD:-}
       PORT: 3001
       CORS_ORIGIN: ${CORS_ORIGIN:-http://localhost:8081,http://localhost,${PUBLIC_BASE_URL:-http://localhost:8081}}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
       FFMPEG_PATH: ffmpeg
       STREAMS_DIR: /var/streams
       UPLOADS_DIR: /var/uploads
       NGINX_HLS_URL: http://nginx-rtmp:8080/hls
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8081}
+      KURDLOGS_PUBLIC_SITE_URL: ${KURDLOGS_PUBLIC_SITE_URL:-}
+      KURDLOGS_APP_URL: ${KURDLOGS_APP_URL:-}
+      KURDLOGS_API_URL: ${KURDLOGS_API_URL:-}
+      KURDLOGS_CDN_URL: ${KURDLOGS_CDN_URL:-}
       HTTP_PORT: ${HTTP_PORT:-8081}
       RTMP_PUBLISH_PORT: ${RTMP_PUBLISH_PORT:-1936}
       MCR_RTMP_PORT: ${MCR_RTMP_PORT:-1936}
@@ -48,6 +58,7 @@ services:
       IPTV_API_KEY: ${IPTV_API_KEY:-change-me-iptv-api-key}
       TOKEN_OVERLAP_SECONDS: ${TOKEN_OVERLAP_SECONDS:-120}
       TOKEN_REFRESH_AHEAD_SECONDS: ${TOKEN_REFRESH_AHEAD_SECONDS:-90}
+      MAX_UPLOAD_MB: ${MAX_UPLOAD_MB:-4096}
       NODE_ENV: production
     volumes:
       - streams_data:/var/streams
@@ -58,6 +69,17 @@ services:
       nginx-rtmp:
         condition: service_started
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3001/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 45s
+    logging:
+      driver: local
+      options:
+        max-size: "50m"
+        max-file: "5"
     networks:
       kurdlogs_net:
         # Pinned IP so nginx-rtmp's on_publish callback target stays valid across
@@ -70,10 +92,25 @@ services:
       dockerfile: docker/frontend.Dockerfile
     ports:
       # Default 8081 — port 80 is often taken by Flussonic/nginx on VPS hosts
-      - "${HTTP_PORT:-8081}:80"
+      - "${PANEL_BIND_HOST:-0.0.0.0}:${HTTP_PORT:-8081}:80"
+    environment:
+      KURDLOGS_PUBLIC_SITE_URL: ${KURDLOGS_PUBLIC_SITE_URL:-}
+      KURDLOGS_APP_URL: ${KURDLOGS_APP_URL:-}
+      KURDLOGS_API_URL: ${KURDLOGS_API_URL:-}
+      KURDLOGS_CDN_URL: ${KURDLOGS_CDN_URL:-}
     depends_on:
       - backend
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "5"
     networks:
       - kurdlogs_net
 
@@ -87,6 +124,16 @@ services:
       # KurdLogs MCR RTMP — port 1936 (Flussonic keeps host 1935)
       - "${RTMP_PUBLISH_PORT:-1936}:${MCR_RTMP_PORT:-1936}"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/health || exit 1"]
+      interval: 20s
+      timeout: 5s
+      retries: 3
+    logging:
+      driver: local
+      options:
+        max-size: "20m"
+        max-file: "5"
     networks:
       - kurdlogs_net
 

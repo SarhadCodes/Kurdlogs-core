@@ -46,34 +46,57 @@ class BlueprintService {
     });
 
     const { probeMediaDurationSec } = await import('./mediaProbe.service');
+    const { ingestService } = await import('./ingest.service');
 
     for (const pl of rows) {
       const items = await Promise.all(
         pl.items.map(async (item) => {
-          const probed = item.videoPath ? await probeMediaDurationSec(item.videoPath) : undefined;
+          const normalizedPath = path.join(env.UPLOADS_DIR, 'normalized', `${item.id}.mp4`);
+          const broadcastPath = fs.existsSync(normalizedPath) ? normalizedPath : null;
+          if (!broadcastPath) {
+            const sourcePath = ingestService.resolveSourcePath(item);
+            if (sourcePath && !ingestService.isProcessing(item.id)) {
+              // Legacy READY rows may point directly at uploaded source files.
+              // Do not put those mixed-format files in a live concat. Queue a
+              // one-time normalization and add the item when it is broadcast-safe.
+              logger.warn(`[BROADCAST_NORMALIZE] itemId=${item.id} playlistId=${pl.id} action=queued`);
+              ingestService.enqueueIngest({
+                itemId: item.id,
+                playlistId: pl.id,
+                sourcePath,
+                skipBrand: true,
+                jobType: 'INGEST',
+              });
+            }
+            return null;
+          }
+          const probed = await probeMediaDurationSec(broadcastPath);
           const dbDuration = item.duration ?? 120;
           const durationSec = probed ?? dbDuration;
           return {
             id: item.id,
             originalFilename: item.originalFilename,
             durationSec,
-            videoPath: item.videoPath,
+            videoPath: broadcastPath,
           };
         })
       );
       map.set(pl.id, {
         id: pl.id,
         name: pl.name,
-        items,
+        items: items.filter((item): item is NonNullable<typeof item> => item !== null),
       });
     }
     return map;
   }
 
   private extractPlaylistIds(blocks: BlueprintBlock[]): string[] {
-    return blocks
-      .map((b) => b.config?.playlistId)
-      .filter((id): id is string => !!id);
+    return blocks.flatMap((block) => {
+      const rotationIds = block.config?.scheduleRules?.playlists
+        ?.map((entry) => entry.playlistId)
+        .filter(Boolean) ?? [];
+      return [block.config?.playlistId, ...rotationIds].filter((id): id is string => !!id);
+    });
   }
 
   private parseBlocks(raw: unknown): BlueprintBlock[] {
@@ -495,20 +518,8 @@ class BlueprintService {
         void this.regenerateTimelineCacheForChannel(blueprintId, channelId);
       }
 
-      const wallNow = cursor.now;
-      const rawStartsAt = timelineSegment?.startsAt ?? windowSeg.startsAt;
-      const rawDate = new Date(rawStartsAt);
-      const displayOffsetMs = Date.parse(wallNow) - rawDate.getTime();
-      logger.info(
-        `[TIME_DEBUG] channelId=${channelId} rawStartsAt=${rawStartsAt} ` +
-          `utcStartsAt=${rawDate.toISOString()} ` +
-          `localStartsAt=${rawDate.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} ` +
-          `displayedTime=${new Date(rawDate.getTime() + displayOffsetMs).toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' })} ` +
-          `timezoneOffsetMinutes=${-new Date().getTimezoneOffset()} ` +
-          `displayOffsetMs=${displayOffsetMs} ` +
-          `scheduleAnchorMs=${runtime.scheduleAnchorMs} ` +
-          `windowScheduleStartMs=${runtime.windowScheduleStartMs} wallNow=${wallNow}`
-      );
+      // Timing values are returned to the caller below. Do not emit this
+      // high-cardinality diagnostic on every cursor poll in production.
     }
 
     const currentMedia = cursor.current?.title ?? null;
@@ -1050,7 +1061,13 @@ class BlueprintService {
     });
 
     const { blueprintPlaybackService } = await import('./blueprintPlayback.service');
-    const concatPath = await blueprintPlaybackService.refreshChannelWindow(channelId);
+    // Publishing changes the definition of the schedule even when the
+    // blueprint record keeps its ID.  Reset the live window anchor so an
+    // active time window takes effect immediately instead of inheriting an
+    // old future cursor.
+    const concatPath = await blueprintPlaybackService.refreshChannelWindow(channelId, {
+      reason: 'blueprint_changed',
+    });
     this.invalidateTimelineCaches(blueprintId, 'BLUEPRINT_REPUBLISH');
 
     if (!concatPath || !fs.existsSync(concatPath)) {

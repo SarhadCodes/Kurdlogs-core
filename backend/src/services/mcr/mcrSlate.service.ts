@@ -47,6 +47,9 @@ class McrSlateService {
       '-hide_banner',
       '-loglevel',
       'error',
+      // lavfi sources are infinite and otherwise run as fast as the CPU can encode.
+      // Pace this standby stream at its declared frame rate.
+      '-re',
       '-f',
       'lavfi',
       '-i',
@@ -64,6 +67,8 @@ class McrSlateService {
       'libx264',
       '-preset',
       'ultrafast',
+      '-threads:v',
+      '1',
       '-tune',
       'stillimage',
       '-pix_fmt',

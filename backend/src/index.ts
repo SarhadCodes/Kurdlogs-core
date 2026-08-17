@@ -18,6 +18,7 @@ import { prisma } from './config/database';
 
 const app = express();
 const server = http.createServer(app);
+let ready = false;
 
 // Allow large playlist uploads (nginx also needs long proxy timeouts).
 server.timeout = 7_200_000;
@@ -58,6 +59,12 @@ app.use(cookieParser());
 app.use(express.json({ limit: '2mb' }));
 app.use(express.urlencoded({ extended: true }));
 
+// Container/orchestrator readiness probe. It deliberately has no auth and
+// only becomes healthy after the database connection and core workers start.
+app.get('/healthz', (_req, res) => {
+  res.status(ready ? 200 : 503).json({ status: ready ? 'ok' : 'starting' });
+});
+
 // Serve static uploads
 app.use('/uploads', express.static(env.UPLOADS_DIR));
 
@@ -77,7 +84,14 @@ const shutdown = async () => {
   // Stop all FFmpeg streams
   const processes = ffmpegService.getAllProcesses();
   for (const [channelId] of processes) {
-    await ffmpegService.stopStream(channelId);
+    // A backend/container replacement is not an operator Stop. Keep the
+    // desired ONLINE state and logical on-air clock so startup recovery can
+    // resume the channel against the existing HLS buffer.
+    await ffmpegService.stopStream(channelId, {
+      preserveBlueprintRuntime: true,
+      preserveOnAirSession: true,
+      preserveDesiredState: true,
+    });
   }
   
   // Stop services
@@ -137,18 +151,20 @@ server.listen(env.PORT, async () => {
      const { sourceRouterService } = await import('./services/sourceRouter.service');
      await sourceRouterService.migrateAllEnabledMcrChannels();
      await sourceRouterService.recoverRelaysOnStartup();
-     if (env.MCR_ARCHITECTURE === 'v2-switcher') {
-       const { mcrSlateService } = await import('./services/mcr/mcrSlate.service');
-       void mcrSlateService.ensureSlate().catch((err) =>
-         logger.warn(`[MCR_SLATE] startup ensure failed: ${err}`)
-       );
-     }
+     // The MCR slate is created lazily by the MCR input/encoder services when a
+     // switcher channel is actually enabled. Starting it here used a full CPU
+     // core encoding an unused 720p/30 black stream on Blueprint-only installs.
 
      const { mcrIngestService } = await import('./services/mcrIngest.service');
      mcrIngestService.startPoller();
 
+     ready = true;
+
      // Recover channels that were running before shutdown (after MCR bus is ready)
      await ffmpegService.recoverChannels();
+
+     const { channelDiagnosticService } = await import('./services/channelDiagnostic.service');
+     await channelDiagnosticService.startContinuousMonitoring();
 
      // Control Room removed
 

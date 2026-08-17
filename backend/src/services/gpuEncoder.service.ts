@@ -145,7 +145,13 @@ class GpuEncoderService {
     const cpu = (): VideoEncoderConfig => ({
       codec: 'libx264',
       pixelFormat: 'yuv420p',
-      preset: channel?.transcodingProfile?.preset || 'ultrafast',
+      // Long-running channels share a finite CPU budget.  The old per-profile
+      // "veryfast" default can exhaust the host once multiple blueprint
+      // encoders are on air, starving HLS segment writes while the process
+      // still looks alive.  NORMALIZE_PRESET is the production safety cap;
+      // it defaults to ultrafast and can be deliberately changed by an
+      // operator on hosts sized for a slower quality preset.
+      preset: env.NORMALIZE_PRESET || channel?.transcodingProfile?.preset || 'ultrafast',
       label: 'CPU (libx264)',
     });
 
@@ -266,6 +272,8 @@ class GpuEncoderService {
       'libx264',
       k('preset'),
       encoder.preset,
+      k('threads'),
+      String(env.FFMPEG_CPU_THREADS),
       k('b:v'),
       bitrate.b,
       k('maxrate'),
@@ -295,6 +303,8 @@ class GpuEncoderService {
       'libx264',
       '-preset',
       rungs[0].preset,
+      '-threads:v',
+      String(env.FFMPEG_CPU_THREADS),
       '-g',
       String(gop),
       '-keyint_min',

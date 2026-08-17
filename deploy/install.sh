@@ -20,8 +20,8 @@ PROMPT="${ESC}[38;2;167;139;250m"
 
 DIST_BASE="${KURDLOGS_DIST_BASE:-https://kurdlogs-core.sarhadyt.workers.dev}"
 INSTALL_DIR="${KURDLOGS_INSTALL_DIR:-/opt/kurdlogs-core}"
-IMAGE_TAG="${KURDLOGS_IMAGE_TAG:-1.2.1}"
-INSTALLER_VERSION="${KURDLOGS_INSTALLER_VERSION:-2026-07-27-v3}"
+IMAGE_TAG="${KURDLOGS_IMAGE_TAG:-1.2.56}"
+INSTALLER_VERSION="${KURDLOGS_INSTALLER_VERSION:-2026-08-07-v4-subdomains}"
 
 banner() {
   clear 2>/dev/null || true
@@ -88,6 +88,30 @@ port_in_use() {
   fi
 }
 
+wait_for_apt() {
+  local attempt=0
+  local locks=(/var/lib/dpkg/lock-frontend /var/lib/dpkg/lock /var/lib/apt/lists/lock /var/cache/apt/archives/lock)
+  while command -v fuser >/dev/null 2>&1 && fuser "${locks[@]}" >/dev/null 2>&1; do
+    attempt=$((attempt + 1))
+    if [ "$attempt" -gt 30 ]; then
+      fail "Another package installation is still running. Finish it, then run this installer again."
+      exit 1
+    fi
+    info "Waiting for another package installation to finish (${attempt}/30)..."
+    sleep 2
+  done
+}
+
+ensure_apt_space() {
+  local available_kb
+  available_kb="$(df -Pk /var/lib/apt/lists 2>/dev/null | awk 'NR == 2 { print $4 }')"
+  if [ -z "$available_kb" ] || [ "$available_kb" -lt 524288 ]; then
+    fail "At least 512 MB of free Linux disk space is required for installation."
+    info "Free space in the Linux/WSL filesystem, then run this installer again."
+    exit 1
+  fi
+}
+
 banner
 
 if [ "${EUID:-$(id -u)}" -ne 0 ]; then
@@ -102,6 +126,10 @@ step "01" "Install runtime dependencies"
 cmd "apt-get install curl ca-certificates"
 export DEBIAN_FRONTEND=noninteractive
 if command -v apt-get >/dev/null 2>&1; then
+  wait_for_apt
+  # Safe to remove: APT will recreate downloaded package indexes on the next update.
+  apt-get clean -qq || true
+  ensure_apt_space
   apt-get update -qq
   apt-get install -y -qq curl ca-certificates
 fi
@@ -139,11 +167,18 @@ if [ ! -f .env ]; then
   ADMIN_PASSWORD_SHOWN='Kurdlogs!'
   cat > .env <<EOF
 PUBLIC_BASE_URL=http://${PUBLIC_IP}:${HTTP_PORT}
+KURDLOGS_PUBLIC_SITE_URL=
+KURDLOGS_APP_URL=
+KURDLOGS_API_URL=
+KURDLOGS_CDN_URL=
+CORS_ORIGIN=http://localhost:8081,http://localhost,http://${PUBLIC_IP}:${HTTP_PORT}
 JWT_SECRET=$(rand_hex 24)
 ADMIN_INITIAL_PASSWORD=${ADMIN_PASSWORD_SHOWN}
 IPTV_API_KEY=$(rand_hex 16)
 POSTGRES_PASSWORD=$(rand_hex 16)
+COOKIE_SECURE=false
 HTTP_PORT=${HTTP_PORT}
+PANEL_BIND_HOST=0.0.0.0
 RTMP_PUBLISH_PORT=1936
 MCR_RTMP_PORT=1936
 TOKEN_OVERLAP_SECONDS=120
@@ -176,6 +211,7 @@ set_env_value "RTMP_PUBLISH_PORT" "1936"
 set_env_value "MCR_RTMP_PORT" "1936"
 set_env_value "HTTP_PORT" "${HTTP_PORT}"
 set_env_value "PUBLIC_BASE_URL" "http://${PUBLIC_IP}:${HTTP_PORT}"
+set_env_value "CORS_ORIGIN" "http://localhost:8081,http://localhost,http://${PUBLIC_IP}:${HTTP_PORT}"
 info "RTMP ingest pinned to port 1936 (avoids Flussonic on 1935)"
 if port_in_use 1936; then
   fail "Port 1936 is already in use on this machine — nginx-rtmp may fail to start."

@@ -7,6 +7,7 @@ import { prisma } from '../config/database';
 import { getPublishedHlsManifest } from '../utils/streamPaths';
 import { buildPublicStreamUrl } from '../utils/streamUrls';
 import { logger } from '../utils/logger';
+import { getApiBaseUrl } from '../config/publicUrl';
 
 function operatorFromReq(req: AuthRequest) {
   if (!req.user) return undefined;
@@ -100,7 +101,8 @@ export const addRtmpSource = async (req: AuthRequest, res: Response) => {
 export const getSourcePreviewUrl = async (req: AuthRequest, res: Response) => {
   const channelId = String(req.params.channelId);
   const sourceId = String(req.params.sourceId);
-  const base = `${req.protocol}://${req.get('host')}`;
+  const apiBase = getApiBaseUrl();
+  const streamBase = `${apiBase}/stream`;
 
   const source = await prisma.mcrSource.findFirst({
     where: { id: sourceId, routerChannelId: channelId },
@@ -116,7 +118,8 @@ export const getSourcePreviewUrl = async (req: AuthRequest, res: Response) => {
     if (sessionKey) {
       const slug = mcrSourceSessionService.getSessionPreviewSlug(channelId, sourceId);
       const manifest = getPublishedHlsManifest(slug) ?? 'index.m3u8';
-      const url = sourceRouterService.getPreviewSessionUrl(channelId, sourceId);
+      const previewPath = sourceRouterService.getPreviewSessionUrl(channelId, sourceId);
+      const url = previewPath.startsWith('http') ? previewPath : `${apiBase}${previewPath}`;
       logger.info(
         `[MCR_PLAYER] action=preview-url channelId=${channelId} sourceId=${sourceId} ` +
           `sessionKey=${sessionKey} slug=${slug} manifest=${manifest}`
@@ -143,7 +146,7 @@ export const getSourcePreviewUrl = async (req: AuthRequest, res: Response) => {
       return;
     }
     const manifest = getPublishedHlsManifest(ch.slug) ?? '720p/index.m3u8';
-    const url = buildPublicStreamUrl(base, ch.slug, manifest);
+    const url = buildPublicStreamUrl(streamBase, ch.slug, manifest);
     res.json({
       success: true,
       data: { url, slug: ch.slug, manifest, kind: 'hls' },
@@ -166,7 +169,7 @@ export const getSourcePreviewUrl = async (req: AuthRequest, res: Response) => {
     });
     if (ch) {
       const manifest = getPublishedHlsManifest(ch.slug) ?? '720p/index.m3u8';
-      const url = buildPublicStreamUrl(base, ch.slug, manifest);
+      const url = buildPublicStreamUrl(streamBase, ch.slug, manifest);
       res.json({ success: true, data: { url, slug: ch.slug, manifest, kind: 'hls' } });
       return;
     }

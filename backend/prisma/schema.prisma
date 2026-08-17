@@ -88,6 +88,7 @@ enum AppLogCategory {
   UPLOAD
   BRANDING
   FFMPEG
+  GRAPHICS
   PLAYLIST
   CHANNEL
   BENCHMARK
@@ -215,6 +216,8 @@ model Channel {
   useBlueprint         Boolean             @default(false)
   blueprintId          String?             @unique
   blueprint            ChannelBlueprint?   @relation(fields: [blueprintId], references: [id])
+  /// Logical on-air session start. Internal encoder/window handoffs do not reset it.
+  onAirSince           DateTime?
   createdAt            DateTime            @default(now())
   updatedAt            DateTime            @updatedAt
 
@@ -226,6 +229,56 @@ model Channel {
   mcrSources   McrSource[]     @relation("McrSourceRefChannel")
   controlRoom  ControlRoomState?
   hybrid       HybridChannelState?
+  graphics     ChannelGraphics?
+}
+
+enum GraphicsMode {
+  PLAYER
+  BURN_IN
+  HYBRID
+}
+
+model GraphicsAsset {
+  id          String   @id @default(uuid())
+  filename    String
+  mimeType    String
+  path        String   @unique
+  sha256      String   @unique
+  width       Int?
+  height      Int?
+  bytes       Int
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  scenes      GraphicsScene[]
+}
+
+model GraphicsScene {
+  id          String   @id @default(uuid())
+  name        String
+  version     Int      @default(1)
+  document    Json
+  isPublished Boolean  @default(false)
+  assetId     String?
+  asset       GraphicsAsset? @relation(fields: [assetId], references: [id], onDelete: SetNull)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  channels    ChannelGraphics[]
+
+  @@unique([name, version])
+}
+
+model ChannelGraphics {
+  channelId       String       @id
+  channel         Channel      @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  mode            GraphicsMode @default(PLAYER)
+  enabled         Boolean      @default(false)
+  sceneId         String?
+  scene           GraphicsScene? @relation(fields: [sceneId], references: [id], onDelete: SetNull)
+  sceneVersion    Int          @default(0)
+  rendererState   String       @default("STOPPED")
+  lastCommandId   String?
+  lastError       String?
+  updatedAt       DateTime     @updatedAt
 }
 
 model HybridChannelState {
@@ -390,6 +443,8 @@ model StreamLog {
   level     LogLevel
   message   String
   timestamp DateTime @default(now())
+
+  @@index([timestamp])
 }
 
 model StreamStats {
@@ -404,6 +459,8 @@ model StreamStats {
   frames    Int      @default(0)
   speed     String   @default("0x")
   timestamp DateTime @default(now())
+
+  @@index([timestamp])
 }
 
 model AppLog {
@@ -413,6 +470,8 @@ model AppLog {
   message   String
   meta      Json?
   createdAt DateTime       @default(now())
+
+  @@index([createdAt])
 }
 
 /// Remote VPS worker for distributed encoding and streaming (Boost).

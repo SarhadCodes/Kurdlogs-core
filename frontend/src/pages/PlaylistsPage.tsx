@@ -209,6 +209,9 @@ const PlaylistsPage: React.FC = () => {
 
   const uploadErrorMessage = (err: any): string => {
     if (typeof err === 'string') return err;
+    if (err?.status === 413 || err?.response?.status === 413 || /status code 413/i.test(err?.message || '')) {
+      return 'Upload rejected because the file exceeds the server limit.';
+    }
     return err?.error || err?.message || 'Upload failed — file may be too large or connection timed out';
   };
 

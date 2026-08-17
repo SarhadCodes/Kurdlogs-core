@@ -21,6 +21,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import Modal from '../components/Modal';
 import EmptyState from '../components/EmptyState';
 import ConfirmDialog from '../components/ConfirmDialog';
+import { getApiOrigin, getPublicStreamBaseUrl } from '../config/runtime';
 
 const TokensPage: React.FC = () => {
   const [tokens, setTokens] = useState<Token[]>([]);
@@ -64,14 +65,14 @@ const TokensPage: React.FC = () => {
     const channel = getChannelForToken(token);
     const slug = channel?.slug || 'unknown';
     const manifest = channel?.outputType === 'DASH' ? 'manifest.mpd' : 'master.m3u8';
-    return buildTokenStreamUrl(window.location.origin, slug, token.token, manifest);
+    return buildTokenStreamUrl(getPublicStreamBaseUrl(), slug, token.token, manifest);
   };
 
   const getStableIptvUrl = (token: Token): string => {
     const channel = getChannelForToken(token);
     const slug = channel?.slug || 'unknown';
     const manifest = channel?.outputType === 'DASH' ? 'manifest.mpd' : 'master.m3u8';
-    return `${window.location.origin}/stream/play/${slug}/${manifest}?api_key=YOUR_IPTV_API_KEY`;
+    return `${getPublicStreamBaseUrl()}/play/${slug}/${manifest}?api_key=YOUR_IPTV_API_KEY`;
   };
 
   const handleCopy = (text: string, label: string) => {
@@ -189,8 +190,8 @@ const TokensPage: React.FC = () => {
             <code className="text-gray-400">IPTV_API_KEY</code> in docker-compose.
           </p>
           <div className="text-xs text-gray-400 space-y-1 font-mono">
-            <p>GET {window.location.origin}/api/iptv/channels</p>
-            <p>GET {window.location.origin}/api/iptv/channels/:slug/token</p>
+            <p>GET {getApiOrigin()}/api/iptv/channels</p>
+            <p>GET {getApiOrigin()}/api/iptv/channels/:slug/token</p>
             <p>Header: X-IPTV-Key: your-api-key</p>
           </div>
         </div>

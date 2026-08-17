@@ -3,6 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import LivePlayer from '../components/LivePlayer';
 import { buildStreamUrl } from '../utils/streamUrl';
 import type { OutputType } from '../types';
+import { getApiBaseUrl, getPublicStreamBaseUrl } from '../config/runtime';
 
 function manifestFromQuery(searchParams: URLSearchParams): string {
   const format = searchParams.get('format');
@@ -32,7 +33,9 @@ export default function EmbedPlayerPage() {
         let outputType: OutputType = 'HLS';
 
         if (apiKey) {
-          const res = await fetch(`/api/iptv/channels/${slug!}?api_key=${encodeURIComponent(apiKey)}`);
+          const res = await fetch(`${getApiBaseUrl()}/iptv/channels/${slug!}?api_key=${encodeURIComponent(apiKey)}`, {
+            credentials: 'include',
+          });
           const json = await res.json();
           if (!json.success) {
             setError(json.error || 'Invalid API key or channel');
@@ -46,7 +49,7 @@ export default function EmbedPlayerPage() {
 
         const channelSlug = slug as string;
         if (apiKey) {
-          setSrc(`/stream/play/${channelSlug}/${manifest}?api_key=${encodeURIComponent(apiKey)}`);
+          setSrc(`${getPublicStreamBaseUrl()}/play/${channelSlug}/${manifest}?api_key=${encodeURIComponent(apiKey)}`);
         } else if (streamToken) {
           setSrc(buildStreamUrl(channelSlug, manifest, streamToken));
         } else {

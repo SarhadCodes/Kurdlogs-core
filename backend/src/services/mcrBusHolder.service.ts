@@ -41,6 +41,7 @@ class McrBusHolderService {
       '-i', 'anullsrc=r=48000:cl=stereo',
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
+      '-threads:v', '1',
       '-tune', 'zerolatency',
       '-pix_fmt', 'yuv420p',
       '-g', '50',

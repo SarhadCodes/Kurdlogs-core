@@ -214,6 +214,19 @@ class WebSocketService {
       this.io.emit(WebSocketEvents.HYBRID_STATE, { channelId, state });
     }
   }
+
+  emitGraphicsState(channelId: string, state: Record<string, unknown>) {
+    if (this.io) {
+      this.io.to(`channel:${channelId}`).emit(WebSocketEvents.GRAPHICS_STATE, { channelId, state });
+      this.io.emit(WebSocketEvents.GRAPHICS_STATE, { channelId, state });
+    }
+  }
+
+  emitGraphicsCommand(channelId: string, command: Record<string, unknown>) {
+    if (this.io) {
+      this.io.to(`channel:${channelId}`).emit(WebSocketEvents.GRAPHICS_COMMAND, { channelId, command });
+    }
+  }
 }
 
 export const wsService = new WebSocketService();

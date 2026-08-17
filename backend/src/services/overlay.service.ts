@@ -124,8 +124,10 @@ class OverlayService {
     for (const overlay of this.getActiveOverlays(overlays)) {
       if (overlay.type === 'LOGO' || overlay.type === 'WATERMARK') {
         const imagePath = this.getImagePath(overlay.config);
-        // Loop static images for the full stream duration (required for overlay filter).
-        inputs.push('-loop', '1', '-framerate', '24', '-i', imagePath);
+        // A logo is static: decode it once per second and let the overlay filter
+        // repeat the frame. Decoding the same PNG at program frame rate wastes
+        // CPU and auto-creates another large worker pool per live channel.
+        inputs.push('-loop', '1', '-framerate', '1', '-threads', '1', '-i', imagePath);
       }
     }
     return inputs;
@@ -134,7 +136,7 @@ class OverlayService {
   /** Playlist streams use per-video burned logos — skip runtime logo/watermark filters. */
   getPlaylistStreamOverlays(overlays: any[]): any[] {
     return (overlays || []).filter(
-      (o) => o.isActive && o.type !== 'LOGO' && o.type !== 'WATERMARK'
+      (o) => o.isActive && (o.isGraphicsOverlay || (o.type !== 'LOGO' && o.type !== 'WATERMARK'))
     );
   }
 
@@ -187,12 +189,17 @@ class OverlayService {
     return path.join(env.UPLOADS_DIR, normalized);
   }
 
-  async buildFilterComplex(overlays: any[]): Promise<string | null> {
+  /**
+   * Build the overlay chain on a caller-provided video label. Graphics scenes
+   * use a normalized 1280x720 canvas, so their editor coordinates are the
+   * same coordinates FFmpeg receives after letterboxing source material.
+   */
+  async buildFilterComplex(overlays: any[], initialVideoLabel = '[0:v]'): Promise<string | null> {
     const activeOverlays = this.getActiveOverlays(overlays);
     if (activeOverlays.length === 0) return null;
 
     const parts: string[] = [];
-    let currentInput = '[0:v]';
+    let currentInput = initialVideoLabel;
     let imageInputIndex = 1;
 
     for (let i = 0; i < activeOverlays.length; i++) {
@@ -223,8 +230,17 @@ class OverlayService {
           parts.push(`[${ol}s]colorchannelmixer=aa=${opacity.toFixed(3)}[${ol}]`);
         }
 
+        // Static image inputs are intentionally looped so the logo remains on
+        // screen for the entire program. They must not, however, keep the
+        // output alive after the primary program input reaches EOF. With
+        // shortest=0 FFmpeg repeated the program's final frame forever while
+        // the logo continued, producing fresh-but-frozen HLS segments.
+        // Keep the program in YUV. `format=auto` promotes every 720p program
+        // frame to RGBA for a small static logo, which is needlessly costly on
+        // a live CPU encoder. The RGBA logo input still retains its alpha while
+        // overlay converts only the compositing result to broadcast YUV420.
         parts.push(
-          `${currentInput}[${imgLabel}]overlay=${x}:${y}:format=auto:eof_action=repeat:shortest=0${scheduleEnable}${outputName}`
+          `${currentInput}[${imgLabel}]overlay=${x}:${y}:format=yuv420:eof_action=repeat:shortest=1${scheduleEnable}${outputName}`
         );
         imageInputIndex++;
       } else if (overlay.type === 'SCROLLING_TEXT') {

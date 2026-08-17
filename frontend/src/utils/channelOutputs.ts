@@ -1,13 +1,16 @@
 import { Channel, Token } from '../types';
 import { buildTokenStreamUrl } from './streamUrl';
+import {
+  getAdminStreamBaseUrl,
+  getApiOrigin,
+  getAppOrigin,
+  getCdnOrigin,
+  getPublicStreamBaseUrl,
+} from '../config/runtime';
 
 /** Fallback when play-urls API has not loaded — preserve non-default port (e.g. :8081). */
 function defaultOutputBase(): string {
-  if (typeof window === 'undefined') return '';
-  const { protocol, hostname, port } = window.location;
-  if (port) return `${protocol}//${hostname}:${port}`;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return `${protocol}//${hostname}:8081`;
-  return `${protocol}//${hostname}`;
+  return getCdnOrigin();
 }
 
 export type OutputAuthType = 'none' | 'token' | 'admin' | 'api_key';
@@ -34,6 +37,10 @@ export interface ChannelOutputSection {
 
 export interface ChannelPlayUrlsData {
   baseUrl: string;
+  appUrl?: string;
+  apiUrl?: string;
+  cdnUrl?: string;
+  streamBaseUrl?: string;
   slug: string;
   status: string;
   tokenProtected: boolean;
@@ -82,21 +89,31 @@ export function buildChannelOutputSections(
   activeToken?: Token | null,
   playUrls?: ChannelPlayUrlsData | null
 ): ChannelOutputSection[] {
-  const base = playUrls?.baseUrl || defaultOutputBase();
+  const cdnBase = playUrls?.cdnUrl || playUrls?.baseUrl || defaultOutputBase();
+  const streamBase = playUrls?.streamBaseUrl || getPublicStreamBaseUrl();
+  const appBase = playUrls?.appUrl || getAppOrigin();
+  const apiBase = playUrls?.apiUrl || getApiOrigin();
   const { slug } = channel;
   const tokenValue = activeToken?.token;
   const tokenProtected = playUrls?.tokenProtected ?? !!activeToken;
+  // The server emits one delivery format per channel.  Do not present DASH
+  // URLs for an HLS channel: a manifest.mpd does not exist in that output and
+  // VLC/browser clients correctly reject the resulting 404.
+  const supportsDash = channel.outputType === 'DASH';
 
-  const publicHls = playUrls?.urls.publicHls ?? `${base}/stream/${slug}/master.m3u8`;
-  const publicDash = playUrls?.urls.publicDash ?? `${base}/stream/${slug}/manifest.mpd`;
+  const publicHls = playUrls?.urls.publicHls ?? `${streamBase}/${slug}/master.m3u8`;
+  const publicDash = supportsDash
+    ? (playUrls?.urls.publicDash ?? `${streamBase}/${slug}/manifest.mpd`)
+    : null;
   const tokenHls =
     playUrls?.urls.hlsWithToken ??
-    (tokenValue ? buildTokenStreamUrl(base, slug, tokenValue, 'master.m3u8') : null);
-  const tokenDash =
-    playUrls?.urls.dashWithToken ??
-    (tokenValue ? buildTokenStreamUrl(base, slug, tokenValue, 'manifest.mpd') : null);
+    (tokenValue ? buildTokenStreamUrl(streamBase, slug, tokenValue, 'master.m3u8') : null);
+  const tokenDash = supportsDash
+    ? (playUrls?.urls.dashWithToken ??
+      (tokenValue ? buildTokenStreamUrl(streamBase, slug, tokenValue, 'manifest.mpd') : null))
+    : null;
   const stableHls = playUrls?.urls.stableHls;
-  const stableDash = playUrls?.urls.stableDash;
+  const stableDash = supportsDash ? playUrls?.urls.stableDash : null;
 
   const sections: ChannelOutputSection[] = [];
 
@@ -180,8 +197,8 @@ export function buildChannelOutputSections(
         protocol: 'TOKEN',
         title: 'Embed player',
         description: 'Iframe with stream token in URL',
-        url: embedUrl(base, slug, { token: tokenValue! }),
-        embedCode: iframeFor(embedUrl(base, slug, { token: tokenValue! })),
+        url: embedUrl(appBase, slug, { token: tokenValue! }),
+        embedCode: iframeFor(embedUrl(appBase, slug, { token: tokenValue! })),
         authType: 'token',
       }
     );
@@ -212,21 +229,25 @@ export function buildChannelOutputSections(
           url: publicHls,
           authType: 'none',
         },
-        {
-          id: 'public-dash',
-          protocol: 'DASH',
-          title: 'DASH',
-          description: 'manifest.mpd',
-          url: publicDash,
-          authType: 'none',
-        },
+        ...(publicDash
+          ? [
+              {
+                id: 'public-dash',
+                protocol: 'DASH',
+                title: 'DASH',
+                description: 'manifest.mpd',
+                url: publicDash,
+                authType: 'none' as const,
+              },
+            ]
+          : []),
         {
           id: 'public-embed',
           protocol: 'EMBED',
           title: 'Embed player',
           description: 'Iframe without authentication',
-          url: embedUrl(base, slug),
-          embedCode: iframeFor(embedUrl(base, slug)),
+          url: embedUrl(appBase, slug),
+          embedCode: iframeFor(embedUrl(appBase, slug)),
           authType: 'none',
         },
       ],
@@ -235,9 +256,10 @@ export function buildChannelOutputSections(
 
   // ── Admin session (httpOnly cookie; same browser only) ──────
   if (adminSessionUrlsEnabled()) {
-    const adminHls = `${base}/stream/${slug}/master.m3u8`;
-    const adminDash = `${base}/stream/${slug}/manifest.mpd`;
-    const adminEmbed = embedUrl(base, slug);
+    const adminStreamBase = apiBase ? `${apiBase}/stream` : getAdminStreamBaseUrl();
+    const adminHls = `${adminStreamBase}/${slug}/master.m3u8`;
+    const adminDash = `${adminStreamBase}/${slug}/manifest.mpd`;
+    const adminEmbed = embedUrl(appBase, slug);
 
     sections.push({
       id: 'admin',
@@ -252,14 +274,18 @@ export function buildChannelOutputSections(
           url: adminHls,
           authType: 'admin',
         },
-        {
-          id: 'admin-dash',
-          protocol: 'DASH',
-          title: 'DASH',
-          description: 'manifest.mpd (session cookie)',
-          url: adminDash,
-          authType: 'admin',
-        },
+        ...(supportsDash
+          ? [
+              {
+                id: 'admin-dash',
+                protocol: 'DASH',
+                title: 'DASH',
+                description: 'manifest.mpd (session cookie)',
+                url: adminDash,
+                authType: 'admin' as const,
+              },
+            ]
+          : []),
         {
           id: 'admin-embed',
           protocol: 'EMBED',
@@ -310,13 +336,13 @@ export function buildChannelOutputSections(
           title: 'Embed (IPTV API key)',
           description: 'Uses api_key from server config',
           url: stableHls
-            ? embedUrl(base, slug, {
+            ? embedUrl(appBase, slug, {
                 api_key: new URL(stableHls).searchParams.get('api_key') || 'YOUR_IPTV_API_KEY',
               })
-            : embedUrl(base, slug, { api_key: 'YOUR_IPTV_API_KEY' }),
+            : embedUrl(appBase, slug, { api_key: 'YOUR_IPTV_API_KEY' }),
           embedCode: stableHls
             ? iframeFor(
-                embedUrl(base, slug, {
+                embedUrl(appBase, slug, {
                   api_key: new URL(stableHls).searchParams.get('api_key') || '',
                 })
               )
@@ -328,7 +354,7 @@ export function buildChannelOutputSections(
   }
 
   const ingest = playUrls?.ingest;
-  const host = typeof window !== 'undefined' ? new URL(base).hostname : 'localhost';
+  const host = typeof window !== 'undefined' ? new URL(apiBase || cdnBase).hostname : 'localhost';
   const rtmpPort = ingest?.publishPort ?? 1936;
   const ingestServer = ingest?.serverUrl || `rtmp://${host}:${rtmpPort}/live`;
   const ingestKey = ingest?.streamKey || slug;

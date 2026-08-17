@@ -83,3 +83,52 @@
   background-image: radial-gradient(circle at 1px 1px, hsl(240 4% 12%) 1px, transparent 0);
   background-size: 24px 24px;
 }
+
+@media (max-width: 767px) {
+  .blueprint-page-shell {
+    height: auto !important;
+  }
+
+  .blueprint-page-content {
+    display: block !important;
+  }
+
+  .blueprint-page-rail {
+    width: 100% !important;
+    max-height: 20rem !important;
+  }
+
+  .blueprint-page-editor {
+    display: block !important;
+    width: 100% !important;
+    margin-top: 1rem;
+  }
+
+  .blueprint-workspace {
+    min-height: auto !important;
+  }
+
+  .blueprint-workspace-bottom {
+    height: auto !important;
+    overflow: visible;
+  }
+
+  .blueprint-resize-handle {
+    display: none;
+  }
+
+  .blueprint-block-palette {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 0.5rem;
+    padding-bottom: 0.25rem;
+  }
+
+  .blueprint-block-palette > p {
+    grid-column: 1 / -1;
+  }
+
+  .blueprint-block-palette > button {
+    min-height: 44px;
+  }
+}

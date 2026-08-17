@@ -30,6 +30,8 @@ import {
 } from '../utils/hybridHls';
 import { matchesHybridTarget, probeStream } from './streamProbe.service';
 import { ffmpegService } from './ffmpeg.service';
+import { hasRecentHlsSegments } from '../utils/streamPaths';
+import { hlsContentHealthService } from './hlsContentHealth.service';
 
 const IPTV_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 const KILL_GRACE_MS = 5000;
@@ -74,14 +76,26 @@ interface HybridProcessEntry {
   kind: HybridDecoderKind;
 }
 
-const PREWARM_MIN_SEGMENTS = 1;
-const PREWARM_WAIT_MS = 8_000;
-const HANDOFF_KEEP_SEGMENTS = 8;
+// Keep enough already-playable material in front of a handoff for ordinary
+// HLS clients (VLC, TVs, browsers) to keep decoding while the next encoder is
+// made authoritative. Live segments are one second; blueprint segments are
+// six seconds, so their warm-up targets intentionally differ.
+const LIVE_PREWARM_MIN_SEGMENTS = 3;
+const BLUEPRINT_PREWARM_MIN_SEGMENTS = 2;
+const PREWARM_WAIT_MS = 15_000;
+const LIVE_OUTPUT_STALL_MS = 45_000;
+const LIVE_OUTPUT_WATCHDOG_MS = 15_000;
+const LIVE_CONTENT_FAILURE_LIMIT = 3;
+const BLACK_RECOVERY_MAX_SEGMENT_BYTES = 180_000;
 
 class HybridOutputService {
   private processes = new Map<string, HybridProcessEntry>();
   private prewarmProcesses = new Map<string, PrewarmEntry>();
   private intentionalStop = new Set<string>();
+  private liveWatchdogs = new Map<string, NodeJS.Timeout>();
+  private liveContentFailures = new Map<string, number>();
+  private liveContentProbeRunning = new Set<string>();
+  private liveContentLastSegment = new Map<string, string>();
 
   isRunning(channelId: string): boolean {
     return this.processes.has(channelId);
@@ -89,6 +103,7 @@ class HybridOutputService {
 
   async stop(channelId: string): Promise<void> {
     await this.stopLivePrewarm(channelId);
+    this.clearLiveWatchdog(channelId);
 
     const entry = this.processes.get(channelId);
     if (!entry) return;
@@ -225,10 +240,7 @@ class HybridOutputService {
     return startNumber;
   }
 
-  /**
-   * TV-style go-live: pre-buffer live while blueprint keeps playing, then instant splice.
-   * Optional station ID only when configured and saved.
-   */
+  /** TV-style transition: pre-buffer live while Blueprint stays on air, then play Station ID and splice. */
   async transitionToLive(
     channel: { id: string; name: string; slug: string; transcodingProfile?: { resolution?: string | null } | null },
     options: TransitionToLiveOptions
@@ -250,7 +262,7 @@ class HybridOutputService {
     );
 
     const prewarmDir = getHybridPrewarmDir(outDir, variant);
-    await waitForPrewarmSegments(prewarmDir, PREWARM_MIN_SEGMENTS, PREWARM_WAIT_MS).catch(
+    await waitForPrewarmSegments(prewarmDir, LIVE_PREWARM_MIN_SEGMENTS, PREWARM_WAIT_MS).catch(
       async () => {
         await prewarmPromise.catch(() => undefined);
         logger.warn(`[HYBRID] live prewarm thin channel=${channel.slug} — switching with buffer`);
@@ -260,7 +272,6 @@ class HybridOutputService {
     if (options.stationPath) {
       await ffmpegService.stopDecoderOnly(channel.id, { preserveBlueprintRuntime: true });
       await this.stop(channel.id);
-      prepareHybridHandoff(outDir, variant);
       try {
         await this.playStationId(
           channel,
@@ -283,9 +294,10 @@ class HybridOutputService {
     );
     await this.stopLivePrewarm(channel.id);
 
-    const { nextStartNumber, mergedLiveCount } = mergePrewarmIntoMain(outDir, variant, {
-      keepStationSegments: options.stationPath ? 0 : HANDOFF_KEEP_SEGMENTS,
-    });
+    // Keep the existing manifest and append the prewarmed source after the
+    // Station ID. Rewriting an active media playlist makes HLS players lose
+    // their timeline and show a loading spinner.
+    const { nextStartNumber, mergedLiveCount } = mergePrewarmIntoMain(outDir, variant);
 
     await this.startLiveFeed(channel, url, options.normalization, {
       handoff: mergedLiveCount > 0 ? 'continue' : 'seamless',
@@ -316,7 +328,7 @@ class HybridOutputService {
     const prewarmPromise = ffmpegService.startBlueprintPrewarm(full);
     const prewarmDir = getHybridPrewarmDir(outDir, variant);
 
-    await waitForPrewarmSegments(prewarmDir, PREWARM_MIN_SEGMENTS, PREWARM_WAIT_MS).catch(
+    await waitForPrewarmSegments(prewarmDir, BLUEPRINT_PREWARM_MIN_SEGMENTS, PREWARM_WAIT_MS).catch(
       async () => {
         await prewarmPromise.catch(() => undefined);
         logger.warn(`[HYBRID] blueprint prewarm thin channel=${channel.slug} — switching with buffer`);
@@ -325,7 +337,6 @@ class HybridOutputService {
 
     if (options.stationPath) {
       await this.stop(channel.id);
-      prepareHybridHandoff(outDir, variant);
       try {
         await this.playStationId(
           channel,
@@ -347,9 +358,7 @@ class HybridOutputService {
     );
     await ffmpegService.stopBlueprintPrewarm(channel.id);
 
-    const { nextStartNumber, mergedLiveCount } = mergePrewarmIntoMain(outDir, variant, {
-      keepStationSegments: options.stationPath ? 0 : HANDOFF_KEEP_SEGMENTS,
-    });
+    const { nextStartNumber, mergedLiveCount } = mergePrewarmIntoMain(outDir, variant);
 
     ffmpegService.clearReconnectState(channel.id);
     await ffmpegService.startStream(full, {
@@ -430,6 +439,100 @@ class HybridOutputService {
 
     this.prewarmProcesses.delete(channelId);
     await this.gracefulKill(entry.process);
+  }
+
+  private clearLiveWatchdog(channelId: string): void {
+    const timer = this.liveWatchdogs.get(channelId);
+    if (timer) clearInterval(timer);
+    this.liveWatchdogs.delete(channelId);
+    this.liveContentFailures.delete(channelId);
+    this.liveContentProbeRunning.delete(channelId);
+    this.liveContentLastSegment.delete(channelId);
+  }
+
+  private startLiveWatchdog(channelId: string, slug: string, proc: ChildProcess): void {
+    this.clearLiveWatchdog(channelId);
+    const timer = setInterval(() => {
+      const active = this.processes.get(channelId);
+      if (!active || active.process.pid !== proc.pid) {
+        this.clearLiveWatchdog(channelId);
+        return;
+      }
+      if (hasRecentHlsSegments(slug, LIVE_OUTPUT_STALL_MS)) {
+        void this.checkLiveContent(channelId, slug, proc);
+        return;
+      }
+
+      logger.error(`[HYBRID] live output stalled channel=${slug}; restarting decoder`);
+      monitorService.addLog(channelId, 'ERROR', 'Hybrid live output stalled. Restarting decoder...');
+      this.clearLiveWatchdog(channelId);
+      void this.gracefulKill(proc);
+    }, LIVE_OUTPUT_WATCHDOG_MS);
+    this.liveWatchdogs.set(channelId, timer);
+  }
+
+  private async checkLiveContent(channelId: string, slug: string, proc: ChildProcess): Promise<void> {
+    if (this.liveContentProbeRunning.has(channelId)) return;
+    this.liveContentProbeRunning.add(channelId);
+
+    try {
+      const result = await hlsContentHealthService.probe(slug);
+      const active = this.processes.get(channelId);
+      if (!active || active.process.pid !== proc.pid) return;
+
+      if (
+        result.segmentPath &&
+        this.liveContentLastSegment.get(channelId) === result.segmentPath
+      ) {
+        return;
+      }
+      if (result.segmentPath) this.liveContentLastSegment.set(channelId, result.segmentPath);
+
+      if (result.status === 'healthy' || result.status === 'missing') {
+        this.liveContentFailures.set(channelId, 0);
+        return;
+      }
+
+      // External live feeds often contain intentional fades and dark shots.
+      // A blackdetect hit alone must never tear down the on-air output.
+      if (
+        result.status === 'black' &&
+        (result.segmentSize == null || result.segmentSize > BLACK_RECOVERY_MAX_SEGMENT_BYTES)
+      ) {
+        this.liveContentFailures.set(channelId, 0);
+        logger.info(
+          `[HYBRID_CONTENT_WATCHDOG] channel=${slug} dark-program-segment ignored ` +
+            `size=${result.segmentSize ?? 0} blackDuration=${result.blackDuration.toFixed(2)}`
+        );
+        return;
+      }
+
+      const failures = (this.liveContentFailures.get(channelId) ?? 0) + 1;
+      this.liveContentFailures.set(channelId, failures);
+      logger.warn(
+        `[HYBRID_CONTENT_WATCHDOG] channel=${slug} status=${result.status} ` +
+          `failures=${failures}/${LIVE_CONTENT_FAILURE_LIMIT} ` +
+          `segment=${result.segmentPath ?? 'none'} size=${result.segmentSize ?? 0} ` +
+          `blackDuration=${result.blackDuration.toFixed(2)}`
+      );
+
+      if (failures < LIVE_CONTENT_FAILURE_LIMIT) return;
+
+      this.liveContentFailures.set(channelId, 0);
+      monitorService.addLog(
+        channelId,
+        'ERROR',
+        result.status === 'black'
+          ? 'Hybrid content watchdog detected sustained black video. Reconnecting live feed...'
+          : 'Hybrid content watchdog detected undecodable video. Reconnecting live feed...'
+      );
+      this.clearLiveWatchdog(channelId);
+      await this.gracefulKill(proc);
+    } catch (error) {
+      logger.warn(`[HYBRID_CONTENT_WATCHDOG] probe failed channel=${slug}:`, error);
+    } finally {
+      this.liveContentProbeRunning.delete(channelId);
+    }
   }
 
   /** Pre-probe live URL while station ID plays — cuts dead air before OBS handoff. */
@@ -514,6 +617,7 @@ class HybridOutputService {
 
     const proc = spawn(env.FFMPEG_PATH, args);
     this.processes.set(channel.id, { process: proc, kind: 'live' });
+    this.startLiveWatchdog(channel.id, channel.slug, proc);
 
     await prisma.hybridChannelState.update({
       where: { channelId: channel.id },
@@ -537,6 +641,7 @@ class HybridOutputService {
     }
 
     proc.on('close', async (code) => {
+      this.clearLiveWatchdog(channel.id);
       const intentional = this.intentionalStop.has(channel.id) || !this.processes.has(channel.id);
       this.processes.delete(channel.id);
 

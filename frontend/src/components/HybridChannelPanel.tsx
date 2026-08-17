@@ -5,6 +5,7 @@ import { hybridApi, playlistApi, type HybridChannelSnapshot } from '../services/
 import { wsService } from '../services/websocket';
 import type { Playlist, PlaylistItem } from '../types';
 import LoadingSpinner from './LoadingSpinner';
+import { getPublicStreamBaseUrl } from '../config/runtime';
 
 interface HybridChannelPanelProps {
   channelId: string;
@@ -205,7 +206,10 @@ export default function HybridChannelPanel({ channelId, channelSlug, isOnline }:
             Hybrid Channel
           </h3>
           <p className="text-xs text-gray-500 mt-0.5">
-            Viewer URL stays <span className="font-mono text-gray-400">/stream/{channelSlug}/master.m3u8</span>
+            Viewer URL stays <span className="font-mono text-gray-400">{getPublicStreamBaseUrl()}/{channelSlug}/master.m3u8</span>
+          </p>
+          <p className="mt-1 text-xs text-emerald-300/80">
+            The next source is buffered before it is taken on air; viewers keep the same stream URL.
           </p>
         </div>
         <span
@@ -354,6 +358,10 @@ export default function HybridChannelPanel({ channelId, channelSlug, isOnline }:
           {action === 'return' ? 'Returning…' : 'Return To Schedule'}
         </button>
       </div>
+
+      <p className="rounded-lg border border-white/10 bg-white/[0.025] px-3 py-2 text-xs text-gray-400">
+        For the smoothest switch, keep <strong className="font-medium text-gray-200">Live feed normalization</strong> on AUTO or ON. The next source is pre-buffered while the current program stays on air, then the Station ID plays and the new source is appended to the same viewer timeline.
+      </p>
 
       {!isOnline && (
         <p className="text-xs text-amber-500/90">Start the channel before switching sources.</p>

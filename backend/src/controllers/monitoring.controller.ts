@@ -1,6 +1,5 @@
 import { Request, Response } from 'express';
 import { monitorService } from '../services/monitor.service';
-import os from 'os';
 import { ffmpegService } from '../services/ffmpeg.service';
 import { prisma } from '../config/database';
 import { AppError } from '../middleware/errorHandler';
@@ -8,30 +7,49 @@ import { gpuEncoderService } from '../services/gpuEncoder.service';
 import { channelHealthService } from '../services/channelHealth.service';
 import { appLogService } from '../services/appLog.service';
 import fs from 'fs';
+import { AuthRequest } from '../types';
+import { StorageCleanupTarget, storageService } from '../services/storage.service';
+import { channelDiagnosticService } from '../services/channelDiagnostic.service';
 
 export const getGpuEncoderStatus = async (_req: Request, res: Response) => {
   res.json({ success: true, data: gpuEncoderService.getStatus() });
 };
 
 export const getSystemStats = async (_req: Request, res: Response) => {
-  const totalMem = os.totalmem();
-  const freeMem = os.freemem();
-  const usedMem = totalMem - freeMem;
-  const memPercent = (usedMem / totalMem) * 100;
-  const cpuPercent = monitorService.getSystemCpuPercent();
-  const activeChannels = ffmpegService.getAllProcesses().size;
-
   res.json({
     success: true,
-    data: {
-      cpu: cpuPercent,
-      ram: memPercent,
-      totalMem,
-      usedMem,
-      activeChannels,
-      uptime: os.uptime(),
-    },
+    data: monitorService.getSystemSnapshot(),
   });
+};
+
+export const getStorageStats = async (req: Request, res: Response) => {
+  const force = String(req.query.force || '') === 'true';
+  res.json({ success: true, data: await storageService.getReport(force) });
+};
+
+export const cleanupStorage = async (req: AuthRequest, res: Response) => {
+  if (req.user?.role !== 'ADMIN') {
+    throw new AppError('Only an administrator can clear storage.', 403);
+  }
+  if (req.body?.confirm !== 'CLEAR_STORAGE') {
+    throw new AppError('Storage cleanup confirmation is required.', 400);
+  }
+  const targets = Array.isArray(req.body?.targets)
+    ? (req.body.targets as StorageCleanupTarget[])
+    : [];
+  try {
+    const data = await storageService.cleanup(targets);
+    await appLogService.log('SYSTEM', 'Storage cleanup completed', 'INFO', {
+      userId: req.user.id,
+      targets,
+      deletedFiles: data.deletedFiles,
+      freedBytes: data.freedBytes,
+      removedRows: data.removedRows,
+    });
+    res.json({ success: true, data, message: 'Storage cleanup completed safely.' });
+  } catch (error: any) {
+    throw new AppError(error?.message || 'Storage cleanup failed.', 400);
+  }
 };
 
 export const getChannelHealthAll = async (_req: Request, res: Response) => {
@@ -64,6 +82,17 @@ export const getChannelHealth = async (req: Request, res: Response) => {
       stats: processInfo?.stats || null
     }
   });
+};
+
+export const startChannelDiagnostic = async (req: Request, res: Response) => {
+  const data = await channelDiagnosticService.start(String(req.params.channelId));
+  res.json({ success: true, data });
+};
+
+export const getChannelDiagnostic = async (req: Request, res: Response) => {
+  const data = channelDiagnosticService.get(String(req.params.channelId));
+  if (!data) throw new AppError('No flight-recorder data for this channel yet.', 404);
+  res.json({ success: true, data });
 };
 
 export const getGlobalLogs = async (req: Request, res: Response) => {

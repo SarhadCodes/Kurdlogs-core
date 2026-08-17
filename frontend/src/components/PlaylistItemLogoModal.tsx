@@ -5,6 +5,7 @@ import Modal from './Modal';
 import OverlayPreview from './OverlayPreview';
 import { playlistApi } from '../services/api';
 import { PlaylistItem, PlaylistItemLogoConfig } from '../types';
+import { resolvePublicUploadUrl } from '../config/runtime';
 
 const CANVAS_W = 1280;
 const CANVAS_H = 720;
@@ -14,8 +15,8 @@ function logoPreviewUrl(storedPath?: string | null): string | undefined {
   const normalized = storedPath.replace(/\\/g, '/');
   const match =
     normalized.match(/(?:^|\/)uploads\/(logos\/[^/]+)$/i) || normalized.match(/(logos\/[^/]+)$/i);
-  if (match) return `/uploads/${match[1]}`;
-  if (normalized.startsWith('/uploads/')) return normalized;
+  if (match) return resolvePublicUploadUrl(`/uploads/${match[1]}`);
+  if (normalized.startsWith('/uploads/')) return resolvePublicUploadUrl(normalized);
   return undefined;
 }
 

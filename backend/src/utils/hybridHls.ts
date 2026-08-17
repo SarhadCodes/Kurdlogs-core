@@ -32,7 +32,7 @@ function hlsProfileSettings(profile: HybridHlsProfile): {
       listSize: HYBRID_LIVE_LIST_SIZE,
       gop: HYBRID_LIVE_GOP_FRAMES,
       deleteThreshold: 2,
-      preset: 'veryfast',
+      preset: 'ultrafast',
       tune: 'zerolatency',
     };
   }
@@ -42,7 +42,7 @@ function hlsProfileSettings(profile: HybridHlsProfile): {
       listSize: HYBRID_STATION_LIST_SIZE,
       gop: HYBRID_STATION_GOP_FRAMES,
       deleteThreshold: 4,
-      preset: 'veryfast',
+      preset: 'ultrafast',
     };
   }
   return {
@@ -50,7 +50,7 @@ function hlsProfileSettings(profile: HybridHlsProfile): {
     listSize: HYBRID_HLS_LIST_SIZE,
     gop: HYBRID_HLS_GOP_FRAMES,
     deleteThreshold: 30,
-    preset: 'veryfast',
+    preset: 'ultrafast',
   };
 }
 
@@ -230,20 +230,19 @@ export function stripHybridEndList(outDir: string, variant: string): void {
 export function sanitizeLiveHlsPlaylist(content: string): string {
   const lines = content.replace(/#EXT-X-ENDLIST\s*/g, '').trimEnd().split('\n');
 
-  if (!lines.some((l) => l.startsWith('#EXT-X-PLAYLIST-TYPE'))) {
-    const versionIdx = lines.findIndex((l) => l.startsWith('#EXT-X-VERSION'));
-    if (versionIdx >= 0) {
-      lines.splice(versionIdx + 1, 0, '#EXT-X-PLAYLIST-TYPE:EVENT');
-    }
+  // A master manifest only selects renditions. Media-playlist tags such as
+  // PLAYLIST-TYPE and START do not belong there, and native/browser HLS
+  // clients can reject the otherwise valid master manifest when they appear.
+  if (lines.some((l) => l.startsWith('#EXT-X-STREAM-INF'))) {
+    return `${lines.join('\n').trimEnd()}\n`;
   }
 
-  if (!lines.some((l) => l.startsWith('#EXT-X-START:'))) {
-    const versionIdx = lines.findIndex((l) => l.startsWith('#EXT-X-VERSION'));
-    const insertAt = versionIdx >= 0 ? versionIdx + 2 : 2;
-    lines.splice(insertAt, 0, '#EXT-X-START:TIME-OFFSET=-3.0');
-  }
-
-  return `${lines.join('\n').trimEnd()}\n`;
+  // Live output must stay a sliding playlist. EVENT prevents pruning and will
+  // eventually leave a huge manifest that references deleted old segments.
+  const liveLines = lines.filter(
+    (line) => !line.startsWith('#EXT-X-PLAYLIST-TYPE:EVENT') && !line.startsWith('#EXT-X-START:')
+  );
+  return `${liveLines.join('\n').trimEnd()}\n`;
 }
 
 /** Low-latency demuxer options — place immediately before `-i` on live HLS inputs. */
@@ -265,12 +264,6 @@ export function appendHybridLiveInputOptions(args: string[]): void {
 function pushHlsStartNumber(args: string[], startNumber?: number): void {
   if (startNumber != null && startNumber > 0) {
     args.push('-start_number', String(startNumber));
-  }
-}
-
-function pushHybridEventPlaylistType(args: string[], profile: HybridHlsProfile): void {
-  if (profile === 'live' || profile === 'station') {
-    args.push('-hls_playlist_type', 'event');
   }
 }
 
@@ -326,8 +319,6 @@ export function appendHybridHlsOutput(
   }
 
   pushHlsStartNumber(args, startNumber);
-  pushHybridEventPlaylistType(args, profile);
-
   args.push(
     '-max_muxing_queue_size',
     '2048',
@@ -368,8 +359,6 @@ export function appendHybridStreamCopyHls(
   if (hasAudio) args.push('-c:a', 'copy');
 
   pushHlsStartNumber(args, startNumber);
-  pushHybridEventPlaylistType(args, profile);
-
   args.push(
     '-max_muxing_queue_size',
     '4096',
@@ -544,30 +533,26 @@ export function waitForPrewarmSegments(
 }
 
 /**
- * Splice pre-buffered live segments into the main playlist the moment station ID ends.
- * Keeps only recent station segments (not old blueprint) so players jump straight to live.
+ * Append pre-buffered segments to the active media playlist.
+ *
+ * HLS players track the manifest as a timeline.  Rebuilding that file during
+ * a source switch makes an already-playing client believe its current segment
+ * disappeared, which causes the browser/VLC loading state.  Keep every
+ * existing tag and segment (including the Station ID), then append a clean
+ * discontinuity and the ready-to-play destination segments.
  */
+const HYBRID_HANDOFF_WINDOW_SEGMENTS = 30;
+
 export function mergePrewarmIntoMain(
   outDir: string,
   variant: string,
-  options?: { stationStartNumber?: number; keepStationSegments?: number }
 ): { nextStartNumber: number; mergedLiveCount: number } {
-  const keepStationSegments = options?.keepStationSegments ?? 0;
   const variantDir = path.join(outDir, variant);
   const prewarmDir = getHybridPrewarmDir(outDir, variant);
   const mainPlaylistPath = path.join(variantDir, 'index.m3u8');
   const prewarmPlaylistPath = path.join(prewarmDir, 'index.m3u8');
 
   ensureHybridOutputDirs(outDir, variant);
-
-  let stationSegments: ParsedHlsSegment[] = [];
-  if (fs.existsSync(mainPlaylistPath)) {
-    stationSegments = parseHlsSegments(fs.readFileSync(mainPlaylistPath, 'utf8'));
-    if (options?.stationStartNumber != null) {
-      stationSegments = stationSegments.filter((s) => s.number >= options.stationStartNumber!);
-    }
-    stationSegments = stationSegments.slice(-keepStationSegments);
-  }
 
   const prewarmSegments = fs.existsSync(prewarmPlaylistPath)
     ? parseHlsSegments(fs.readFileSync(prewarmPlaylistPath, 'utf8'))
@@ -586,29 +571,27 @@ export function mergePrewarmIntoMain(
     nextNumber++;
   }
 
+  const existing = fs.existsSync(mainPlaylistPath)
+    ? parseHlsSegments(fs.readFileSync(mainPlaylistPath, 'utf8'))
+    : [];
+  // Retain a generous handoff window for active clients, but bound it so a
+  // channel can operate for months without an ever-growing manifest.
+  const retained = existing.slice(-HYBRID_HANDOFF_WINDOW_SEGMENTS);
+  const all = [...retained, ...mergedLive];
   const targetDur = Math.max(
     HYBRID_LIVE_SEGMENT_SECONDS + 1,
     HYBRID_STATION_SEGMENT_SECONDS + 1,
     HYBRID_HLS_SEGMENT_SECONDS + 1
   );
-
-  const rebuilt: string[] = [
+  const rebuilt = [
     '#EXTM3U',
     '#EXT-X-VERSION:3',
-    '#EXT-X-PLAYLIST-TYPE:EVENT',
-    '#EXT-X-START:TIME-OFFSET=-3.0',
     `#EXT-X-TARGETDURATION:${targetDur}`,
+    ...(all.length > 0 ? [`#EXT-X-MEDIA-SEQUENCE:${all[0].number}`] : []),
   ];
-
-  for (const seg of stationSegments) {
-    rebuilt.push(seg.extinf, seg.uri);
-  }
-  if (mergedLive.length > 0) {
-    rebuilt.push('#EXT-X-DISCONTINUITY');
-    for (const seg of mergedLive) {
-      rebuilt.push(seg.extinf, seg.uri);
-    }
-  }
+  for (const seg of retained) rebuilt.push(seg.extinf, seg.uri);
+  if (retained.length > 0 && mergedLive.length > 0) rebuilt.push('#EXT-X-DISCONTINUITY');
+  for (const seg of mergedLive) rebuilt.push(seg.extinf, seg.uri);
   rebuilt.push('');
   fs.writeFileSync(mainPlaylistPath, rebuilt.join('\n'), 'utf8');
 

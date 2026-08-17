@@ -188,7 +188,7 @@ class HybridChannelService {
       const freshState = await prisma.hybridChannelState.findUnique({ where: { channelId } });
       const stationPath = freshState ? await this.resolveStationIdPath(freshState) : null;
       logger.info(
-        `[HYBRID] go-live channel=${channel.slug} stationBumper=${stationPath ? 'yes' : 'no'}`
+        `[HYBRID] go-live channel=${channel.slug} stationTransition=${stationPath ? 'yes' : 'no'}`
       );
 
       let spliced = false;
@@ -257,7 +257,7 @@ class HybridChannelService {
       const freshState = await prisma.hybridChannelState.findUnique({ where: { channelId } });
       const stationPath = freshState ? await this.resolveStationIdPath(freshState) : null;
       logger.info(
-        `[HYBRID] return-to-schedule channel=${channel.slug} stationBumper=${stationPath ? 'yes' : 'no'}`
+        `[HYBRID] return-to-schedule channel=${channel.slug} stationTransition=${stationPath ? 'yes' : 'no'}`
       );
 
       let spliced = false;

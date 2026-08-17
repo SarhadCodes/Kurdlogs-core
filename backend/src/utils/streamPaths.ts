@@ -148,6 +148,42 @@ export function hasRecentHlsSegments(
   if (!fs.existsSync(streamRoot)) return false;
 
   const now = Date.now();
+  // A recently written orphaned .ts file is not proof that viewers can play
+  // the stream. Require the current variant manifest to reference a segment
+  // that is also fresh. This catches the common "encoder is alive, but the
+  // public link is frozen" failure mode.
+  const manifestIsFreshAndPlayable = (folder: string): boolean => {
+    const manifestPath = path.join(folder, 'index.m3u8');
+    if (!fs.existsSync(manifestPath)) return false;
+    try {
+      if (now - fs.statSync(manifestPath).mtimeMs > maxAgeMs) return false;
+      const entries = fs.readFileSync(manifestPath, 'utf8')
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .filter((line) => line && !line.startsWith('#'));
+      const latest = entries.at(-1)?.split('?')[0];
+      if (!latest || !latest.endsWith('.ts')) return false;
+      const segmentPath = path.join(folder, latest);
+      return fs.existsSync(segmentPath) && now - fs.statSync(segmentPath).mtimeMs <= maxAgeMs;
+    } catch {
+      return false;
+    }
+  };
+
+  let hasManifest = false;
+  for (const sub of ['720p', '480p', '1080p']) {
+    hasManifest ||= fs.existsSync(path.join(streamRoot, sub, 'index.m3u8'));
+    if (manifestIsFreshAndPlayable(path.join(streamRoot, sub))) return true;
+  }
+  hasManifest ||= fs.existsSync(path.join(streamRoot, 'index.m3u8'));
+  if (manifestIsFreshAndPlayable(streamRoot)) return true;
+
+  // Once a variant has published a manifest, that manifest is the source of
+  // truth. Do not let abandoned segment files mask a frozen public playlist.
+  if (hasManifest) return false;
+
+  // Keep the short startup grace path for encoders which have emitted a first
+  // segment but have not yet atomically written their manifest.
   const scan = (folder: string): boolean => {
     if (!fs.existsSync(folder)) return false;
     for (const name of fs.readdirSync(folder)) {

@@ -3,6 +3,8 @@ import type {
   BlueprintBlock,
   BlueprintBlockType,
   BlueprintRuntimeState,
+  BlueprintSchedulePlaylist,
+  BlueprintScheduleRule,
   ResolvedSegment,
   SimulationResult,
   SimulationWarning,
@@ -41,6 +43,87 @@ const CONTENT_TYPES = new Set<BlueprintBlockType>([
   'SUPER',
 ]);
 
+const SCHEDULE_CONTENT_TYPES: BlueprintBlockType[] = [
+  'MOVIE', 'MUSIC', 'CARTOON', 'PROMO', 'INTRO', 'STATION_ID', 'SUPER',
+];
+
+function timeToMinutes(value: unknown): number | null {
+  if (typeof value !== 'string' || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return null;
+  const [hours, minutes] = value.split(':').map(Number);
+  return hours * 60 + minutes;
+}
+
+function localMinutesAt(at: number, timezone: string): number {
+  try {
+    const parts = new Intl.DateTimeFormat('en-GB', {
+      timeZone: timezone,
+      hour: '2-digit',
+      minute: '2-digit',
+      hourCycle: 'h23',
+    }).formatToParts(new Date(at));
+    const hour = Number(parts.find((part) => part.type === 'hour')?.value ?? 0);
+    const minute = Number(parts.find((part) => part.type === 'minute')?.value ?? 0);
+    return hour * 60 + minute;
+  } catch {
+    const date = new Date(at);
+    return date.getHours() * 60 + date.getMinutes();
+  }
+}
+
+function scheduleRule(block: BlueprintBlock): BlueprintScheduleRule | null {
+  if (block.type !== 'SCHEDULE') return null;
+  const rule = block.config.scheduleRules;
+  const start = timeToMinutes(rule?.startTime);
+  const end = timeToMinutes(rule?.endTime);
+  if (!rule || rule.enabled === false || start == null || end == null) return null;
+  return rule;
+}
+
+function isScheduleActive(block: BlueprintBlock, at: number): boolean {
+  const rule = scheduleRule(block);
+  if (!rule) return false;
+  const start = timeToMinutes(rule.startTime)!;
+  const end = timeToMinutes(rule.endTime)!;
+  if (start === end) return true;
+  const now = localMinutesAt(at, rule.timezone || 'Asia/Baghdad');
+  return start <= end ? now >= start && now <= end : now >= start || now <= end;
+}
+
+function hasExclusiveScheduleActive(blocks: BlueprintBlock[], at: number): boolean {
+  return blocks.some((block) => block.type === 'SCHEDULE' && isScheduleActive(block, at) && block.config.scheduleRules?.exclusive !== false);
+}
+
+function schedulePlaylists(block: BlueprintBlock): BlueprintSchedulePlaylist[] {
+  const entries = block.config.scheduleRules?.playlists
+    ?.filter((entry) => !!entry.playlistId) ?? [];
+  if (entries.length > 0) return entries;
+  return block.config.playlistId ? [{ playlistId: block.config.playlistId }] : [];
+}
+
+function schedulePlaybackBlock(block: BlueprintBlock, state: BlueprintRuntimeState): BlueprintBlock {
+  const entries = schedulePlaylists(block);
+  const cursor = state.scheduleRotationCursors?.[block.id] ?? 0;
+  const entry = entries.length > 0 ? entries[cursor % entries.length] : undefined;
+  const contentType = entry?.contentType || block.config.scheduleRules?.contentType;
+  if (!contentType || !SCHEDULE_CONTENT_TYPES.includes(contentType)) return block;
+  return {
+    ...block,
+    type: contentType,
+    config: {
+      ...block.config,
+      playlistId: entry?.playlistId || block.config.playlistId,
+      repeatCount: Math.max(1, entry?.videosPerTurn ?? 1),
+    },
+  };
+}
+
+function advanceScheduleRotation(block: BlueprintBlock, state: BlueprintRuntimeState): void {
+  const entries = schedulePlaylists(block);
+  if (entries.length < 2) return;
+  if (!state.scheduleRotationCursors) state.scheduleRotationCursors = {};
+  state.scheduleRotationCursors[block.id] = ((state.scheduleRotationCursors[block.id] ?? 0) + 1) % entries.length;
+}
+
 function blockLabel(block: BlueprintBlock): string {
   return block.label || block.type.replace(/_/g, ' ');
 }
@@ -54,6 +137,7 @@ function createInitialState(): BlueprintRuntimeState {
     typePlayCounts: {},
     minutesSinceReset: 0,
     occurrenceCounters: {},
+    scheduleRotationCursors: {},
   };
 }
 
@@ -110,6 +194,7 @@ function cloneState(state: BlueprintRuntimeState): BlueprintRuntimeState {
     lastItemByBlock: { ...state.lastItemByBlock },
     typePlayCounts: { ...state.typePlayCounts },
     occurrenceCounters: { ...(state.occurrenceCounters ?? {}) },
+    scheduleRotationCursors: { ...(state.scheduleRotationCursors ?? {}) },
   };
 }
 
@@ -350,30 +435,41 @@ class BlueprintEngineService {
       if (!CONTENT_TYPES.has(block.type)) continue;
 
       const label = blockLabel(block);
-      const playlistId = block.config.playlistId;
 
-      if (!playlistId) {
+      if (block.type === 'SCHEDULE' && !scheduleRule(block)) {
+        warnings.push(
+          warn('EMPTY_BLOCK', `${label} needs a valid daily start and end time`, 'Set a time window such as 18:00 to 23:59 in Schedule block settings.', block.id, 'critical')
+        );
+        continue;
+      }
+
+      const playlistIds = block.type === 'SCHEDULE'
+        ? schedulePlaylists(block).map((entry) => entry.playlistId)
+        : (block.config.playlistId ? [block.config.playlistId] : []);
+
+      if (playlistIds.length === 0) {
         warnings.push(
           warn('MISSING_PLAYLIST', `${label} has no playlist`, 'Open block settings and choose a content playlist.', block.id, 'critical')
         );
         continue;
       }
 
-      const pl = playlists.get(playlistId);
-      if (!pl || pl.items.length === 0) {
-        warnings.push(
-          warn(
-            'EMPTY_PLAYLIST',
-            `${label} — playlist "${pl?.name || 'unknown'}" is empty`,
-            'Upload videos to this playlist or pick a different one.',
-            block.id,
-            'critical'
-          )
-        );
-        continue;
-      }
+      for (const playlistId of playlistIds) {
+        const pl = playlists.get(playlistId);
+        if (!pl || pl.items.length === 0) {
+          warnings.push(
+            warn(
+              'EMPTY_PLAYLIST',
+              `${label} — playlist "${pl?.name || 'unknown'}" is empty`,
+              'Upload videos to this playlist or pick a different one.',
+              block.id,
+              'critical'
+            )
+          );
+          continue;
+        }
 
-      if (pl.items.length === 1) {
+        if (pl.items.length === 1) {
         warnings.push(
           warn(
             'SINGLE_ITEM',
@@ -383,12 +479,15 @@ class BlueprintEngineService {
             'warning'
           )
         );
-      }
+        }
 
-      if (block.type === 'MOVIE') maxMoviePool = Math.max(maxMoviePool, pl.items.length);
-      if (block.type === 'PROMO') maxPromoPool = Math.max(maxPromoPool, pl.items.length);
+        const effectiveType = block.type === 'SCHEDULE'
+          ? (block.config.scheduleRules?.playlists?.find((entry) => entry.playlistId === playlistId)?.contentType || block.config.scheduleRules?.contentType)
+          : block.type;
+        if (effectiveType === 'MOVIE') maxMoviePool = Math.max(maxMoviePool, pl.items.length);
+        if (effectiveType === 'PROMO') maxPromoPool = Math.max(maxPromoPool, pl.items.length);
 
-      if (block.type === 'MOVIE' && block.config.selectionMode === 'RANDOM' && pl.items.length < 5) {
+        if (effectiveType === 'MOVIE' && block.config.selectionMode === 'RANDOM' && pl.items.length < 5) {
         warnings.push(
           warn(
             'HIGH_REPEAT',
@@ -398,6 +497,7 @@ class BlueprintEngineService {
             'warning'
           )
         );
+        }
       }
     }
 
@@ -472,12 +572,23 @@ class BlueprintEngineService {
         continue;
       }
 
+      const exclusiveScheduleActive = hasExclusiveScheduleActive(blocks, timeCursor);
+      if (block.type === 'SCHEDULE' && !isScheduleActive(block, timeCursor)) {
+        state.blockIndex = (state.blockIndex + 1) % blocks.length;
+        continue;
+      }
+      if (exclusiveScheduleActive && block.type !== 'SCHEDULE') {
+        state.blockIndex = (state.blockIndex + 1) % blocks.length;
+        continue;
+      }
+
       if (shouldSkipForTransition(block, state.blockIndex, blocks, state)) {
         state.blockIndex = (state.blockIndex + 1) % blocks.length;
         continue;
       }
 
-      const playlistId = block.config.playlistId;
+      const playbackBlock = block.type === 'SCHEDULE' ? schedulePlaybackBlock(block, state) : block;
+      const playlistId = playbackBlock.config.playlistId;
       const playlist = playlistId ? playlists.get(playlistId) : undefined;
 
       if (!playlistId || !playlist || playlist.items.length === 0) {
@@ -485,12 +596,12 @@ class BlueprintEngineService {
         continue;
       }
 
-      const visitItems = itemsForBlockVisit(block, playlist, state, rng);
+      const visitItems = itemsForBlockVisit(playbackBlock, playlist, state, rng);
       for (const item of visitItems) {
         if (segments.length >= count) break;
         const pushed = pushResolvedSegment(
           segments,
-          block,
+          playbackBlock,
           playlist,
           item,
           state,
@@ -502,6 +613,10 @@ class BlueprintEngineService {
         );
         timeCursor = pushed.timeCursor;
         lastPlayedBlock = pushed.lastPlayedBlock;
+      }
+
+      if (block.type === 'SCHEDULE' && visitItems.length > 0) {
+        advanceScheduleRotation(block, state);
       }
 
       if (block.type === 'PROMO' || block.type === 'STATION_ID') {

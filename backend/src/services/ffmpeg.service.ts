@@ -4,6 +4,7 @@ import fs from 'fs';
 import { prisma } from '../config/database';
 import { env } from '../config/env';
 import { logger } from '../utils/logger';
+import { appendConcatInputArgs } from '../utils/ffmpegConcatInput';
 import { FfmpegProcessInfo, StreamStats } from '../types';
 import { parseFfmpegProgress, sleep } from '../utils/helpers';
 import { wsService } from './websocket.service';
@@ -12,6 +13,9 @@ import { transcodingService } from './transcoding.service';
 import { monitorService } from './monitor.service';
 import { playlistService } from './playlist.service';
 import { gpuEncoderService } from './gpuEncoder.service';
+import { graphicsBurnInService } from './graphics/graphicsBurnIn.service';
+import { hasRecentHlsSegments } from '../utils/streamPaths';
+import { hlsContentHealthService } from './hlsContentHealth.service';
 
 const FREEZE_TIMEOUT_MS = 30_000;
 const RTMP_FREEZE_TIMEOUT_MS = 120_000;
@@ -21,6 +25,12 @@ const ONLINE_CONFIRM_RETRIES = 6;
 const ONLINE_CONFIRM_RETRY_MS = 5_000;
 const MAX_BACKOFF_MS = 60_000;
 const KILL_GRACE_MS = 5_000;
+const CONTENT_PROBE_INTERVAL_MS = 30_000;
+const CONTENT_FAILURE_LIMIT = 3;
+// A dark movie scene can still be several hundred KB at 720p. A six-second
+// all-black H.264 segment is normally tiny (about 40 KB), so only that
+// combination is allowed to request a recovery.
+const BLACK_RECOVERY_MAX_SEGMENT_BYTES = 180_000;
 
 /** HLS tuning — longer segments + deeper playlist = fewer VLC micro-stalls */
 const HLS_SEGMENT_SECONDS = 6;
@@ -31,7 +41,64 @@ class FfmpegService {
   private processes: Map<string, FfmpegProcessInfo> = new Map();
   private blueprintPrewarmProcesses = new Map<string, ChildProcess>();
   private reconnectAttempts: Map<string, number> = new Map();
+  private reconnectTimers: Map<string, NodeJS.Timeout> = new Map();
   private watchdogTimer: NodeJS.Timeout | null = null;
+  private contentProbeState = new Map<
+    string,
+    { lastProbeAt: number; lastSegment: string | null; failures: number; probing: boolean }
+  >();
+
+  /**
+   * A backend restart or interrupted handoff can leave an orphan FFmpeg
+   * process writing the same HLS directory as the next encoder. Two writers
+   * corrupt the manifest and commonly look like a black channel to viewers.
+   * Sweep only FFmpeg processes whose command targets this exact channel's
+   * output folder; never touch other channels or the MCR slate.
+   */
+  private async clearStaleChannelEncoders(channelId: string, slug: string): Promise<void> {
+    if (process.platform !== 'linux') return;
+
+    const outputPrefix = `${this.getHlsOutputPath(slug)}${path.sep}`;
+    const managedPid = this.processes.get(channelId)?.pid;
+    const stalePids: number[] = [];
+
+    try {
+      for (const entry of fs.readdirSync('/proc')) {
+        if (!/^\d+$/.test(entry)) continue;
+        const pid = Number(entry);
+        if (!Number.isSafeInteger(pid) || pid === process.pid || pid === managedPid) continue;
+
+        let command = '';
+        try {
+          command = fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').replace(/\0/g, ' ');
+        } catch {
+          continue;
+        }
+
+        if (!command.includes('ffmpeg') || !command.includes(outputPrefix)) continue;
+        stalePids.push(pid);
+      }
+    } catch (error) {
+      logger.warn(`[ENCODER_GUARD] unable to scan stale encoders channel=${slug}:`, error);
+      return;
+    }
+
+    if (stalePids.length === 0) return;
+
+    logger.warn(`[ENCODER_GUARD] terminating stale encoder(s) channel=${slug} pids=${stalePids.join(',')}`);
+    monitorService.addLog(channelId, 'WARN', `Recovered stale encoder ownership for ${slug}; starting one clean program encoder.`);
+
+    for (const pid of stalePids) {
+      try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ }
+    }
+    await sleep(800);
+    for (const pid of stalePids) {
+      try {
+        process.kill(pid, 0);
+        process.kill(pid, 'SIGKILL');
+      } catch { /* exited cleanly */ }
+    }
+  }
 
   // ─── Watchdog ─────────────────────────────────────────────
 
@@ -79,6 +146,148 @@ class FfmpegService {
           continue;
         }
       }
+
+      // A process may still be alive and writing logs while no media is being
+      // published. Segment freshness is the actual on-air health signal.
+      if (info.markedOnline && !hasRecentHlsSegments(info.slug, 45_000)) {
+        logger.error(`Watchdog: HLS output stalled for channel ${channelId}. Restarting.`);
+        monitorService.addLog(channelId, 'ERROR', 'Watchdog detected stalled HLS output. Restarting...');
+        await this.forceKill(channelId);
+        continue;
+      }
+
+      if (
+        info.markedOnline &&
+        (info.playbackSource === 'BLUEPRINT' || info.playbackSource === 'PLAYLIST')
+      ) {
+        void this.checkPublishedContent(channelId, info);
+      }
+    }
+  }
+
+  /**
+   * Segment freshness cannot detect a decoder that is publishing a black
+   * canvas. Probe completed HLS segments and require repeated failures before
+   * restarting, so ordinary fades/cuts do not interrupt the channel.
+   */
+  private async checkPublishedContent(
+    channelId: string,
+    info: FfmpegProcessInfo
+  ): Promise<void> {
+    const now = Date.now();
+    const state = this.contentProbeState.get(channelId) ?? {
+      lastProbeAt: 0,
+      lastSegment: null,
+      failures: 0,
+      probing: false,
+    };
+
+    if (state.probing || now - state.lastProbeAt < CONTENT_PROBE_INTERVAL_MS) return;
+    state.probing = true;
+    state.lastProbeAt = now;
+    this.contentProbeState.set(channelId, state);
+
+    try {
+      const result = await hlsContentHealthService.probe(info.slug);
+      const active = this.processes.get(channelId);
+      if (!active || active.pid !== info.pid) return;
+
+      // Never count the same completed segment twice.
+      if (result.segmentPath && result.segmentPath === state.lastSegment) return;
+      state.lastSegment = result.segmentPath;
+
+      if (result.status === 'healthy' || result.status === 'missing') {
+        state.failures = 0;
+        return;
+      }
+
+      // Do not restart a healthy channel because a movie contains a dark
+      // scene. Only a sustained, nearly-black *and tiny* HLS segment is a
+      // reliable all-black canvas signal. Decode errors continue to recover.
+      if (
+        result.status === 'black' &&
+        (result.segmentSize == null || result.segmentSize > BLACK_RECOVERY_MAX_SEGMENT_BYTES)
+      ) {
+        state.failures = 0;
+        logger.info(
+          `[CONTENT_WATCHDOG] channel=${info.slug} dark-program-segment ignored ` +
+            `size=${result.segmentSize ?? 0} blackDuration=${result.blackDuration.toFixed(2)}`
+        );
+        return;
+      }
+
+      state.failures += 1;
+      logger.warn(
+        `[CONTENT_WATCHDOG] channel=${info.slug} status=${result.status} ` +
+          `failures=${state.failures}/${CONTENT_FAILURE_LIMIT} ` +
+          `segment=${result.segmentPath ?? 'none'} size=${result.segmentSize ?? 0} ` +
+          `blackDuration=${result.blackDuration.toFixed(2)}`
+      );
+
+      if (state.failures < CONTENT_FAILURE_LIMIT) return;
+
+      state.failures = 0;
+      // HLS black-detection is useful telemetry, but it cannot reliably tell
+      // a deliberately dark scene, a fade, or a short cinematic intro from
+      // broken source media. Never change a user's playlist or interrupt the
+      // encoder based on this heuristic alone. Operators get a clear warning
+      // and can review the media themselves.
+      monitorService.addLog(
+        channelId,
+        'WARN',
+        result.status === 'black'
+          ? 'Content watchdog detected a sustained dark output segment. Media was not removed and the channel remains on air; review it before taking action.'
+          : 'Content watchdog could not decode a published segment. Media was not removed and the channel remains on air; review the channel logs.'
+      );
+      logger.warn(
+        `[CONTENT_WATCHDOG] channel=${info.slug} advisory-only status=${result.status}; ` +
+          'no media was quarantined and no encoder restart was requested'
+      );
+      return;
+    } catch (error) {
+      logger.warn(`[CONTENT_WATCHDOG] probe failed channel=${info.slug}:`, error);
+    } finally {
+      state.probing = false;
+    }
+  }
+
+  /**
+   * A restart alone can replay the same corrupt or all-black normalized asset.
+   * For Blueprint playback we know the exact active PlaylistItem, so quarantine
+   * it after repeated failed HLS probes. The next window is regenerated from
+   * READY items only before the encoder reconnects.
+   */
+  private async quarantineCurrentBlueprintItem(
+    channelId: string,
+    info: FfmpegProcessInfo,
+    failure: 'black' | 'invalid'
+  ): Promise<string | null> {
+    if (info.playbackSource !== 'BLUEPRINT') return null;
+
+    try {
+      const { blueprintPlaybackService } = await import('./blueprintPlayback.service');
+      const runtime = blueprintPlaybackService.syncPlaybackFromFfmpeg(channelId);
+      const current = runtime?.segments[runtime.currentIndex];
+      if (!current?.itemId) return null;
+
+      const updated = await prisma.playlistItem.updateMany({
+        where: { id: current.itemId, status: 'READY' },
+        data: {
+          status: 'FAILED',
+          processingError: `Automatically quarantined after sustained ${failure} output on ${new Date().toISOString()}`,
+        },
+      });
+      if (updated.count === 0) return null;
+
+      await blueprintPlaybackService.refreshChannelWindow(channelId, { reason: 'playlist_mutation' });
+      logger.error(
+        `[CONTENT_WATCHDOG] quarantined itemId=${current.itemId} title=${current.title} ` +
+          `channel=${info.slug} reason=${failure}`
+      );
+      return current.title;
+    } catch (error) {
+      logger.error(`[CONTENT_WATCHDOG] unable to quarantine failing content channel=${info.slug}:`, error);
+      return null;
     }
   }
 
@@ -110,12 +319,37 @@ class FfmpegService {
           logger.warn(`Stream for channel ${channel.name} is already running.`);
           return;
         }
-        await this.stopStream(channel.id);
+        // A forced replacement is an internal handoff/recovery, not an
+        // operator ending the broadcast. Keep the logical on-air session;
+        // startStream will still reset it if the public HLS output is stale.
+        await this.stopStream(channel.id, {
+          preserveOnAirSession: true,
+          preserveDesiredState: true,
+        });
         await this.killChannelPid(channel.id);
         await sleep(1000);
       }
 
+      // Make the HLS directory single-writer before spawning a replacement.
+      // This also repairs channels that survived a backend restart as orphan
+      // FFmpeg processes.
+      await this.clearStaleChannelEncoders(channel.id, channel.slug);
+
       this.ensureOutputDir(channel.slug);
+
+      // A Blueprint window, short encoder recovery, or backend recovery may
+      // replace the FFmpeg child while the buffered HLS output remains on air.
+      // Preserve that logical broadcast session; a real Stop clears the
+      // persisted timestamp and a stale HLS output begins a new session.
+      const sessionRow = await prisma.channel.findUnique({
+        where: { id: channel.id },
+        select: { onAirSince: true },
+      });
+      const storedOnAirSince = sessionRow?.onAirSince ?? null;
+      const sessionStartTime = storedOnAirSince && hasRecentHlsSegments(channel.slug)
+        ? storedOnAirSince
+        : new Date();
+      channel = { ...channel, onAirSince: sessionStartTime };
 
       const { sourceRouterService } = await import('./sourceRouter.service');
       const isMcrBus =
@@ -210,7 +444,14 @@ class FfmpegService {
     }
   }
 
-  public async stopStream(channelId: string, options?: { preserveBlueprintRuntime?: boolean }): Promise<void> {
+  public async stopStream(
+    channelId: string,
+    options?: {
+      preserveBlueprintRuntime?: boolean;
+      preserveOnAirSession?: boolean;
+      preserveDesiredState?: boolean;
+    }
+  ): Promise<void> {
     const processInfo = this.processes.get(channelId);
     if (processInfo) {
       logger.info(`Stopping stream for channel ${channelId}`);
@@ -222,9 +463,15 @@ class FfmpegService {
         await mcrProgramEncoderService.stop(channelId, 'stopStream');
         await prisma.channel.update({
           where: { id: channelId },
-          data: { status: 'OFFLINE', pid: null },
+          data: {
+            status: options?.preserveDesiredState ? 'ONLINE' : 'OFFLINE',
+            pid: null,
+            ...(!options?.preserveOnAirSession ? { onAirSince: null } : {}),
+          },
         });
-        wsService.emitChannelStatus(channelId, 'OFFLINE');
+        if (!options?.preserveDesiredState) {
+          wsService.emitChannelStatus(channelId, 'OFFLINE');
+        }
         return;
       }
 
@@ -246,9 +493,15 @@ class FfmpegService {
     await this.killChannelPid(channelId);
     await prisma.channel.update({
       where: { id: channelId },
-      data: { status: 'OFFLINE', pid: null },
+      data: {
+        status: options?.preserveDesiredState ? 'ONLINE' : 'OFFLINE',
+        pid: null,
+        ...(!options?.preserveOnAirSession ? { onAirSince: null } : {}),
+      },
     });
-    wsService.emitChannelStatus(channelId, 'OFFLINE');
+    if (!options?.preserveDesiredState) {
+      wsService.emitChannelStatus(channelId, 'OFFLINE');
+    }
   }
 
   /** Stop the active decoder without marking the channel offline (hybrid source handoff). */
@@ -274,7 +527,12 @@ class FfmpegService {
   }
 
   public async restartStream(channelId: string, _legacyChannel?: any): Promise<void> {
-    await this.stopStream(channelId);
+    // Restart replaces the encoder but does not end the logical on-air
+    // session while the existing HLS buffer remains playable.
+    await this.stopStream(channelId, {
+      preserveOnAirSession: true,
+      preserveDesiredState: true,
+    });
     await this.killChannelPid(channelId);
     await sleep(2000);
 
@@ -289,7 +547,11 @@ class FfmpegService {
 
   /** Hard restart — used after blueprint publish so FFmpeg picks up the new concat. */
   public async forceRestartChannel(channelId: string): Promise<void> {
-    await this.stopStream(channelId, { preserveBlueprintRuntime: true });
+    await this.stopStream(channelId, {
+      preserveBlueprintRuntime: true,
+      preserveOnAirSession: true,
+      preserveDesiredState: true,
+    });
     await this.forceKill(channelId);
     await this.killChannelPid(channelId);
     await sleep(2500);
@@ -361,7 +623,10 @@ class FfmpegService {
 
   // ─── Auto-reconnect with exponential backoff ──────────────
 
-  private async triggerReconnect(channelId: string): Promise<void> {
+  private async triggerReconnect(
+    channelId: string,
+    options?: { immediate?: boolean; transition?: 'BLUEPRINT_ROLL' }
+  ): Promise<void> {
     const { hybridChannelService } = await import('./hybridChannel.service');
     if (await hybridChannelService.isLiveOverride(channelId)) {
       const state = await prisma.hybridChannelState.findUnique({ where: { channelId } });
@@ -394,29 +659,49 @@ class FfmpegService {
       include: { transcodingProfile: true, overlays: true, playlist: true, blueprint: true },
     });
     if (!channel || !channel.autoReconnect) {
-      await prisma.channel.update({ where: { id: channelId }, data: { status: 'OFFLINE' } });
+      if (channel) {
+        await prisma.channel.update({
+          where: { id: channelId },
+          data: { status: 'OFFLINE', onAirSince: null },
+        });
+      }
       wsService.emitChannelStatus(channelId, 'OFFLINE');
       return;
     }
 
+    if (this.reconnectTimers.has(channelId)) {
+      return;
+    }
+
+    const isBlueprintRoll = options?.transition === 'BLUEPRINT_ROLL';
     const attempts = this.reconnectAttempts.get(channelId) || 0;
-    if (attempts >= channel.maxReconnectAttempts) {
-      logger.error(`Max reconnect attempts (${channel.maxReconnectAttempts}) reached for ${channel.name}. Giving up.`);
-      monitorService.addLog(channelId, 'ERROR', `Max reconnect attempts reached (${channel.maxReconnectAttempts}). Stream stopped.`);
-      await prisma.channel.update({ where: { id: channelId }, data: { status: 'OFFLINE' } });
-      wsService.emitChannelStatus(channelId, 'OFFLINE');
-      this.reconnectAttempts.delete(channelId);
-      return;
+    if (!isBlueprintRoll) {
+      this.reconnectAttempts.set(channelId, attempts + 1);
+    }
+    const delay = options?.immediate
+      ? 0
+      : Math.min(
+          channel.reconnectDelay * Math.pow(2, Math.min(attempts, 8)),
+          MAX_BACKOFF_MS
+        );
+
+    if (isBlueprintRoll) {
+      // Finite Blueprint windows ending at EOF is normal playout behavior.
+      // Preserve the ONLINE state while buffered HLS segments cover the
+      // immediate encoder handoff; this is not a reconnect failure.
+      this.reconnectAttempts.set(channelId, 0);
+      monitorService.addLog(channelId, 'INFO', 'Blueprint handoff — starting the next window now.');
+    } else {
+      await prisma.channel.update({ where: { id: channelId }, data: { status: 'ERROR' } });
+      wsService.emitChannelStatus(channelId, 'ERROR');
+      const label = attempts + 1 > channel.maxReconnectAttempts
+        ? `Reconnecting continuously (attempt ${attempts + 1})`
+        : `Reconnecting (${attempts + 1}/${channel.maxReconnectAttempts})`;
+      monitorService.addLog(channelId, 'WARN', `${label} in ${Math.round(delay / 1000)}s...`);
     }
 
-    this.reconnectAttempts.set(channelId, attempts + 1);
-    const delay = Math.min(channel.reconnectDelay * Math.pow(2, attempts), MAX_BACKOFF_MS);
-
-    await prisma.channel.update({ where: { id: channelId }, data: { status: 'ERROR' } });
-    wsService.emitChannelStatus(channelId, 'ERROR');
-    monitorService.addLog(channelId, 'WARN', `Reconnecting (${attempts + 1}/${channel.maxReconnectAttempts}) in ${Math.round(delay / 1000)}s...`);
-
-    setTimeout(async () => {
+    const timer = setTimeout(async () => {
+      this.reconnectTimers.delete(channelId);
       try {
         // Always reload latest channel config so reconnect does not use stale source URL.
         const latest = await prisma.channel.findUnique({
@@ -429,6 +714,7 @@ class FfmpegService {
         logger.error(`Reconnect failed for channel ${channelId}:`, err);
       }
     }, delay);
+    this.reconnectTimers.set(channelId, timer);
   }
 
   // ─── Process lifecycle helpers ────────────────────────────
@@ -443,13 +729,18 @@ class FfmpegService {
       channelId: channel.id,
       process: proc,
       inputType: channel.isPlaylistChannel ? 'PLAYLIST' : String(channel.sourceType || ''),
+      slug: channel.slug,
       playbackSource,
       startTime: new Date(),
+      sessionStartTime: channel.onAirSince instanceof Date
+        ? channel.onAirSince
+        : new Date(channel.onAirSince || Date.now()),
       stats: { cpu: 0, ram: 0, gpu: 0, bitrate: 0, fps: 0, uptime: 0, frames: 0, speed: '0x' },
       lastProgressTime: Date.now(),
       markedOnline: false,
       sourceUnreachable: false,
     };
+    this.contentProbeState.delete(channel.id);
     this.processes.set(channel.id, info);
     return info;
   }
@@ -479,7 +770,7 @@ class FfmpegService {
           info.stats = {
             ...info.stats,
             ...stats,
-            uptime: Math.floor((Date.now() - info.startTime.getTime()) / 1000),
+            uptime: Math.floor((Date.now() - info.sessionStartTime.getTime()) / 1000),
           };
           if (info.playbackSource === 'BLUEPRINT') {
             import('./blueprintPlayback.service').then(({ blueprintPlaybackService }) => {
@@ -563,7 +854,18 @@ class FfmpegService {
       if (this.hasConfirmedMediaFlow(channel.slug, info, startedAtMs)) {
         info.markedOnline = true;
         this.reconnectAttempts.set(channel.id, 0);
-        prisma.channel.update({ where: { id: channel.id }, data: { status: 'ONLINE' } }).catch(() => {});
+        prisma.channel.update({
+          where: { id: channel.id },
+          data: { status: 'ONLINE', onAirSince: info.sessionStartTime },
+        }).catch(() => {});
+        prisma.channelGraphics.updateMany({
+          where: {
+            channelId: channel.id,
+            enabled: true,
+            mode: { in: ['BURN_IN', 'HYBRID'] },
+          },
+          data: { rendererState: 'RUNNING', lastError: null },
+        }).catch(() => {});
         wsService.emitChannelStatus(channel.id, 'ONLINE');
         monitorService.addLog(channel.id, 'INFO', 'Stream is online.');
         return;
@@ -674,7 +976,7 @@ class FfmpegService {
     }
   ): Promise<void> {
     const isLooping = channel.useBlueprint
-      ? false
+      ? true
       : (channel.playlist?.isLooping ?? false);
     let concatPath: string;
     let playbackSource: 'BLUEPRINT' | 'PLAYLIST';
@@ -682,7 +984,17 @@ class FfmpegService {
     if (await this.shouldUseBlueprintPlayback(channel)) {
       const { blueprintPlaybackService } = await import('./blueprintPlayback.service');
       const { blueprintWindowAuditService } = await import('./blueprintWindowAudit.service');
-      const refreshed = await blueprintPlaybackService.refreshChannelWindow(channel.id);
+      // A blueprint publish prebuilds and validates its replacement window before
+      // requesting this controlled encoder handoff.  Rebuilding it here used the
+      // ordinary window-roll cursor and could immediately overwrite an active
+      // timed schedule (for example, 20:00–03:00 movies) with the old trailer
+      // sequence. Reuse that already-published window; a cold start still builds
+      // one normally because no in-memory runtime exists.
+      const publishedRuntime = blueprintPlaybackService.getRuntime(channel.id);
+      const publishedConcat = blueprintPlaybackService.getBlueprintConcatPath(channel.id);
+      const refreshed = publishedRuntime?.segments.length && fs.existsSync(publishedConcat)
+        ? publishedConcat
+        : await blueprintPlaybackService.refreshChannelWindow(channel.id);
       if (!refreshed) {
         const msg =
           'Blueprint has no ready videos — open Blueprint, assign a playlist to every block, and ensure items are READY.';
@@ -766,16 +1078,16 @@ class FfmpegService {
     const args: string[] = [];
     gpuEncoderService.prependDeviceArgs(args, encoder);
     args.push(...this.getInputCustomArgs(channel));
-    args.push(
-      '-re',
-      '-fflags', '+genpts+igndts+discardcorrupt',
-      '-thread_queue_size', '2048',
-      '-f', 'concat',
-      '-safe', '0',
-      '-i', concatPath
-    );
+    // Blueprint manifests contain a complete seven-day playout schedule.
+    // Loop the concat demuxer inside the same FFmpeg process; reaching the end
+    // must not close the encoder, end the HLS playlist, or reset on-air uptime.
+    appendConcatInputArgs(args, concatPath, {
+      loop: playbackSource === 'BLUEPRINT',
+      decoderThreads: encoder.codec === 'libx264' ? env.FFMPEG_CPU_THREADS : undefined,
+    });
 
-    const playlistOverlays = overlayService.getPlaylistStreamOverlays(channel.overlays || []);
+    const runtimeOverlays = await this.getRuntimeOverlays(channel);
+    const playlistOverlays = overlayService.getPlaylistStreamOverlays(runtimeOverlays);
     const overlayInputs = await overlayService.getOverlayInputs(playlistOverlays);
     args.push(...overlayInputs);
 
@@ -810,11 +1122,41 @@ class FfmpegService {
       logger.info(`[PLAYLIST_AUDIO] channel=${channel.slug} source=concat_audio map=${audioMap}`);
     }
 
-    const filterComplex = await overlayService.buildFilterComplex(playlistOverlays);
+    // Graphics positions are authored on a 1280x720 canvas. Normalize the
+    // program before applying that scene so a 4:3/cinematic source cannot
+    // shift or stretch the placement seen in the graphics editor.
+    const graphicsCanvas = playlistOverlays.some((overlay: any) => overlay.isGraphicsOverlay);
+    const outputDimensions = this.getPlaylistOutputDimensions(channel);
+    const blueprintSourceIsCanonical =
+      playbackSource === 'BLUEPRINT' &&
+      outputDimensions.width === 1280 &&
+      outputDimensions.height === 720;
+    const filterComplex = await overlayService.buildFilterComplex(
+      playlistOverlays,
+      graphicsCanvas && !blueprintSourceIsCanonical ? '[graphicsCanvas]' : '[0:v]'
+    );
     if (this.hasMissingImageOverlay({ ...channel, overlays: playlistOverlays }, filterComplex)) return;
 
-    const playlistMaps = this.preparePlaylistVideoMap(filterComplex, channel, encoder.pixelFormat);
-    args.push('-filter_complex', playlistMaps.filterComplex);
+    const playlistMaps = this.preparePlaylistVideoMap(
+      filterComplex,
+      channel,
+      encoder.pixelFormat,
+      graphicsCanvas,
+      blueprintSourceIsCanonical,
+      this.getPlaylistOutputFps(channel)
+    );
+    // Do not put concat audio through a stateful filter graph. FFmpeg rebuilds
+    // that graph at MP4 boundaries and can reset audio DTS to zero, stalling
+    // HLS until the watchdog intervenes. Canonical inputs plus the AAC output
+    // encoder below preserve one continuous timestamp timeline.
+    // Auto-sized filter pools multiply across channels. Cap them alongside
+    // decoder and x264 threads so a 6-vCPU host stays at realtime speed.
+    args.push(
+      '-filter_complex_threads',
+      String(env.FFMPEG_CPU_THREADS),
+      '-filter_complex',
+      playlistMaps.filterComplex
+    );
 
     this.appendPlaylistStreamOutputs(
       args,
@@ -827,7 +1169,11 @@ class FfmpegService {
       {
         continueAppend,
         listSize: options?.prewarm ? 6 : undefined,
-        eventPlaylist: options?.prewarm || playbackSource === 'BLUEPRINT',
+        outputFps: this.getPlaylistOutputFps(channel),
+        // Blueprint is a live channel too. An EVENT playlist grows forever,
+        // eventually forcing players to scan thousands of stale segments and
+        // exhausting disk space. Reserve it for the short-lived prewarm job.
+        eventPlaylist: options?.prewarm,
       }
     );
 
@@ -857,6 +1203,13 @@ class FfmpegService {
 
     logger.info(`Starting ${sourceLabel} FFmpeg (${encoder.codec}, concat, ${variant}) for ${channel.name}`);
     monitorService.addLog(channel.id, 'INFO', `Playback source: ${sourceLabel}`);
+    if (playbackSource === 'BLUEPRINT') {
+      monitorService.addLog(
+        channel.id,
+        'INFO',
+        'Continuous Blueprint playout enabled — the weekly schedule loops without restarting the channel.'
+      );
+    }
     monitorService.addLog(channel.id, 'INFO', `Video encoder: ${encoder.label} (${encoder.codec})`);
 
     const mainProcess = spawn(env.FFMPEG_PATH, args);
@@ -888,12 +1241,29 @@ class FfmpegService {
     }
 
     mainProcess.on('close', async (code) => {
-      const wasIntentional = !this.processes.has(channel.id);
+      // A replacement encoder can be registered before the previous child has
+      // emitted its delayed `close` event. The old handler must never delete
+      // or reconnect over the replacement; that leaves a live-but-untracked
+      // FFmpeg process which the watchdog can no longer recover.
+      const registered = this.processes.get(channel.id);
+      const ownsRegistration = registered?.pid === mainProcess.pid;
+      if (!ownsRegistration) {
+        logger.info(
+          `[ENCODER_OWNERSHIP] ignored stale close channel=${channel.slug} ` +
+            `closedPid=${mainProcess.pid ?? 'none'} activePid=${registered?.pid ?? 'none'}`
+        );
+        return;
+      }
       this.processes.delete(channel.id);
-      if (wasIntentional) return;
 
-      logger.warn(`Playlist FFmpeg for ${channel.name} exited (code ${code}).`);
-      monitorService.addLog(channel.id, 'WARN', `Playlist FFmpeg exited with code ${code}.`);
+      const cleanBlueprintRoll = playbackSource === 'BLUEPRINT' && !isLooping && code === 0;
+      if (cleanBlueprintRoll) {
+        logger.info(`Blueprint window for ${channel.name} completed normally.`);
+        monitorService.addLog(channel.id, 'INFO', 'Blueprint window completed normally.');
+      } else {
+        logger.warn(`Playlist FFmpeg for ${channel.name} exited (code ${code}).`);
+        monitorService.addLog(channel.id, 'WARN', `Playlist FFmpeg exited with code ${code}.`);
+      }
       if (playbackSource === 'BLUEPRINT' && code !== 0 && code !== null) {
         const { blueprintWindowAuditService } = await import('./blueprintWindowAudit.service');
         blueprintWindowAuditService.logChannelStartFailure(
@@ -921,10 +1291,19 @@ class FfmpegService {
             windowsEmitted: persisted?.windowsEmitted,
           });
           monitorService.addLog(channel.id, 'INFO', 'Blueprint window advanced — loading next videos.');
-          this.triggerReconnect(channel.id);
+          // A clean EOF is the expected end of a finite Blueprint window.
+          // Start its successor immediately; the existing HLS buffer covers
+          // encoder startup and viewers continue using the same URL.
+          this.triggerReconnect(channel.id, {
+            immediate: code === 0,
+            transition: code === 0 ? 'BLUEPRINT_ROLL' : undefined,
+          });
           return;
         }
-        await prisma.channel.update({ where: { id: channel.id }, data: { status: 'OFFLINE' } });
+        await prisma.channel.update({
+          where: { id: channel.id },
+          data: { status: 'OFFLINE', onAirSince: null },
+        });
         wsService.emitChannelStatus(channel.id, 'OFFLINE');
         return;
       }
@@ -1084,19 +1463,45 @@ class FfmpegService {
     }
   }
 
+  /**
+   * Playlist playout is normalized at 24 fps, but a channel can deliberately
+   * use a lower output cadence on a CPU-constrained host. Never allow a
+   * profile to make this software playout path more expensive than 24 fps.
+   */
+  private getPlaylistOutputFps(channel: any): number {
+    const configured = Number(channel.transcodingProfile?.fps);
+    if (!Number.isFinite(configured) || configured <= 0) return 24;
+    return Math.max(12, Math.min(24, Math.round(configured)));
+  }
+
   /** One HLS rung for playlist channels (stable with overlays on CPU VPS). */
   private preparePlaylistVideoMap(
     filterComplex: string | null,
     channel: any,
-    pixelFormat: 'yuv420p' | 'nv12' = 'yuv420p'
+    pixelFormat: 'yuv420p' | 'nv12' = 'yuv420p',
+    normalizeBeforeOverlays = false,
+    sourceAlreadyCanonical = false,
+    outputFps = 24
   ): { filterComplex: string; videoOut: string } {
     const { width, height } = this.getPlaylistOutputDimensions(channel);
-    const base = filterComplex ? '[outv]' : '[0:v]';
-    const prefix = filterComplex ? `${filterComplex};` : '';
+    // A published Blueprint contains only 1280x720, 24 fps canonical media.
+    // Do not scale/pad it once more before a graphics overlay: that redundant
+    // per-frame work steals real-time headroom from the software encoder.
+    const normalize = normalizeBeforeOverlays && !sourceAlreadyCanonical
+      ? `[0:v]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)[graphicsCanvas]`
+      : '';
+    const base = filterComplex
+      ? '[outv]'
+      : normalizeBeforeOverlays && !sourceAlreadyCanonical
+        ? '[graphicsCanvas]'
+        : '[0:v]';
+    const prefix = [normalize, filterComplex].filter(Boolean).join(';');
+    const outputFilter = normalizeBeforeOverlays
+      ? `${base}format=${pixelFormat},fps=${outputFps}[vout]`
+      : `${base}scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=${pixelFormat},fps=${outputFps}[vout]`;
     return {
-      filterComplex:
-        `${prefix}${base}scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
-        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,format=${pixelFormat},fps=24[vout]`,
+      filterComplex: `${prefix ? `${prefix};` : ''}${outputFilter}`,
       videoOut: '[vout]',
     };
   }
@@ -1147,7 +1552,7 @@ class FfmpegService {
     audioMap: string,
     encoder = gpuEncoderService.resolveForChannel(channel),
     startNumber?: number,
-    hlsOptions?: { continueAppend?: boolean; listSize?: number; eventPlaylist?: boolean }
+    hlsOptions?: { continueAppend?: boolean; listSize?: number; eventPlaylist?: boolean; outputFps?: number }
   ): void {
     const { variant } = this.getPlaylistOutputDimensions(channel);
     const bitrate =
@@ -1170,10 +1575,15 @@ class FfmpegService {
       : 'append_list+independent_segments+program_date_time+delete_segments+temp_file+discont_start';
 
     args.push('-map', videoOut, '-map', audioMap);
-    gpuEncoderService.appendVideoEncodeArgs(args, encoder, bitrate, HLS_GOP_FRAMES);
+    const outputFps = hlsOptions?.outputFps ?? 24;
+    gpuEncoderService.appendVideoEncodeArgs(args, encoder, bitrate, outputFps * HLS_SEGMENT_SECONDS);
     args.push(
       '-c:a', 'aac', '-b:a', '192k', '-ar', '48000', '-ac', '2',
       '-max_muxing_queue_size', '2048',
+      // A looped graphics input must never extend a finite playlist window.
+      // End with the program/audio source so the normal window rollover can
+      // start the next batch instead of encoding the last frame forever.
+      '-shortest',
     );
     if (startNumber != null && startNumber > 0) {
       args.push('-start_number', String(startNumber));
@@ -1210,7 +1620,7 @@ class FfmpegService {
     filterComplex: string | null,
     pixelFormat: 'yuv420p' | 'nv12' = 'yuv420p',
     hasAudio = true,
-    options?: { skipFpsCap?: boolean }
+    options?: { skipFpsCap?: boolean; normalizeBeforeOverlays?: boolean }
   ): {
     filterComplex: string;
     video720: string;
@@ -1218,11 +1628,14 @@ class FfmpegService {
     audio720?: string;
     audio480?: string;
   } {
-    const base = filterComplex ? '[outv]' : '[0:v]';
-    const prefix = filterComplex ? `${filterComplex};` : '';
+    const normalize = options?.normalizeBeforeOverlays
+      ? '[0:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)[graphicsCanvas]'
+      : '';
+    const base = filterComplex ? '[outv]' : options?.normalizeBeforeOverlays ? '[graphicsCanvas]' : '[0:v]';
+    const prefix = [normalize, filterComplex].filter(Boolean).join(';');
     const fpsFilter = options?.skipFpsCap ? '' : 'fps=24,';
     let graph =
-      `${prefix}${base}format=${pixelFormat},${fpsFilter}split=2[v720src][v480src];` +
+      `${prefix ? `${prefix};` : ''}${base}format=${pixelFormat},${fpsFilter}split=2[v720src][v480src];` +
       `[v720src]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2[v720];` +
       `[v480src]scale=854:480:force_original_aspect_ratio=decrease,pad=854:480:(ow-iw)/2:(oh-ih)/2[v480]`;
 
@@ -1354,7 +1767,7 @@ class FfmpegService {
    * Falls back to adaptive transcode only when overlays are configured.
    */
   private async startMcrBusStream(channel: any): Promise<void> {
-    const hasOverlays = (channel.overlays || []).length > 0;
+    const hasOverlays = (await this.getRuntimeOverlays(channel)).length > 0;
     if (hasOverlays) {
       logger.info(
         `[MCR_OUTPUT_SOURCE] channelId=${channel.id} encoderMode=transcode-overlays — overlays require re-encode`
@@ -1420,28 +1833,30 @@ class FfmpegService {
     );
 
     child.on('close', async (code) => {
-      const wasIntentional = !this.processes.has(channel.id);
+      const registered = this.processes.get(channel.id);
+      const ownsRegistration = registered?.pid === child.pid;
+      if (!ownsRegistration) {
+        logger.info(
+          `[ENCODER_OWNERSHIP] ignored stale MCR close channel=${channel.slug} ` +
+            `closedPid=${child.pid ?? 'none'} activePid=${registered?.pid ?? 'none'}`
+        );
+        return;
+      }
       const sourceUnreachable = info.sourceUnreachable;
       this.processes.delete(channel.id);
 
       prisma.channel.update({ where: { id: channel.id }, data: { pid: null } }).catch(() => {});
 
-      if (!wasIntentional) {
-        logger.warn(`FFmpeg MCR copy for ${channel.name} exited (code ${code}).`);
-        monitorService.addLog(channel.id, 'WARN', `MCR encoder exited with code ${code}.`);
-        if (sourceUnreachable) {
-          monitorService.addLog(channel.id, 'ERROR', 'Stopped reconnecting: fix the MCR bus and restart the channel.');
-          await prisma.channel.update({ where: { id: channel.id }, data: { status: 'ERROR' } });
-          wsService.emitChannelStatus(channel.id, 'ERROR');
-          this.reconnectAttempts.delete(channel.id);
-          return;
-        }
-        this.triggerReconnect(channel.id);
-      } else {
-        prisma.channel.update({ where: { id: channel.id }, data: { status: 'OFFLINE' } }).catch(() => {});
-        wsService.emitChannelStatus(channel.id, 'OFFLINE');
+      logger.warn(`FFmpeg MCR copy for ${channel.name} exited (code ${code}).`);
+      monitorService.addLog(channel.id, 'WARN', `MCR encoder exited with code ${code}.`);
+      if (sourceUnreachable) {
+        monitorService.addLog(channel.id, 'ERROR', 'Stopped reconnecting: fix the MCR bus and restart the channel.');
+        await prisma.channel.update({ where: { id: channel.id }, data: { status: 'ERROR' } });
+        wsService.emitChannelStatus(channel.id, 'ERROR');
         this.reconnectAttempts.delete(channel.id);
+        return;
       }
+      this.triggerReconnect(channel.id);
     });
 
     child.on('error', (err) => {
@@ -1462,6 +1877,12 @@ class FfmpegService {
     fs.writeFileSync(masterPath, body, 'utf8');
   }
 
+  /** Merge conventional channel overlays with the published static graphics scene. */
+  private async getRuntimeOverlays(channel: any): Promise<any[]> {
+    const graphicsOverlay = await graphicsBurnInService.getActiveOverlay(channel.id);
+    return graphicsOverlay ? [...(channel.overlays || []), graphicsOverlay] : channel.overlays || [];
+  }
+
   private async startDirectStream(channel: any, options?: { skipFpsCap?: boolean }): Promise<void> {
     const hasAudio = await this.probeLiveSourceHasAudio(channel);
     const encoder = gpuEncoderService.resolveForChannel(channel);
@@ -1469,20 +1890,25 @@ class FfmpegService {
 
     gpuEncoderService.prependDeviceArgs(args, encoder);
     args.push(...this.getInputCustomArgs(channel));
-    const overlayInputs = await overlayService.getOverlayInputs(channel.overlays || []);
+    const runtimeOverlays = await this.getRuntimeOverlays(channel);
+    const overlayInputs = await overlayService.getOverlayInputs(runtimeOverlays);
 
     this.appendLiveInputOptions(args, channel);
     args.push('-i', channel.sourceUrl);
     args.push(...overlayInputs);
 
-    const filterComplex = await overlayService.buildFilterComplex(channel.overlays || []);
-    if (this.hasMissingImageOverlay(channel, filterComplex)) return;
+    const graphicsCanvas = runtimeOverlays.some((overlay: any) => overlay.isGraphicsOverlay);
+    const filterComplex = await overlayService.buildFilterComplex(
+      runtimeOverlays,
+      graphicsCanvas ? '[graphicsCanvas]' : '[0:v]'
+    );
+    if (this.hasMissingImageOverlay({ ...channel, overlays: runtimeOverlays }, filterComplex)) return;
 
     const adaptiveMaps = this.prepareAdaptiveMaps(
       filterComplex,
       encoder.pixelFormat,
       hasAudio,
-      { skipFpsCap: options?.skipFpsCap }
+      { skipFpsCap: options?.skipFpsCap, normalizeBeforeOverlays: graphicsCanvas }
     );
     args.push('-filter_complex', adaptiveMaps.filterComplex);
 
@@ -1516,28 +1942,30 @@ class FfmpegService {
     this.scheduleOnlineConfirmation(channel, child, info);
 
     child.on('close', async (code) => {
-      const wasIntentional = !this.processes.has(channel.id);
+      const registered = this.processes.get(channel.id);
+      const ownsRegistration = registered?.pid === child.pid;
+      if (!ownsRegistration) {
+        logger.info(
+          `[ENCODER_OWNERSHIP] ignored stale direct close channel=${channel.slug} ` +
+            `closedPid=${child.pid ?? 'none'} activePid=${registered?.pid ?? 'none'}`
+        );
+        return;
+      }
       const sourceUnreachable = info.sourceUnreachable;
       this.processes.delete(channel.id);
 
       prisma.channel.update({ where: { id: channel.id }, data: { pid: null } }).catch(() => {});
 
-      if (!wasIntentional) {
-        logger.warn(`FFmpeg for ${channel.name} exited (code ${code}).`);
-        monitorService.addLog(channel.id, 'WARN', `FFmpeg exited with code ${code}.`);
-        if (sourceUnreachable) {
-          monitorService.addLog(channel.id, 'ERROR', 'Stopped reconnecting: fix the source URL and restart the channel.');
-          await prisma.channel.update({ where: { id: channel.id }, data: { status: 'ERROR' } });
-          wsService.emitChannelStatus(channel.id, 'ERROR');
-          this.reconnectAttempts.delete(channel.id);
-          return;
-        }
-        this.triggerReconnect(channel.id);
-      } else {
-        prisma.channel.update({ where: { id: channel.id }, data: { status: 'OFFLINE' } }).catch(() => {});
-        wsService.emitChannelStatus(channel.id, 'OFFLINE');
+      logger.warn(`FFmpeg for ${channel.name} exited (code ${code}).`);
+      monitorService.addLog(channel.id, 'WARN', `FFmpeg exited with code ${code}.`);
+      if (sourceUnreachable) {
+        monitorService.addLog(channel.id, 'ERROR', 'Stopped reconnecting: fix the source URL and restart the channel.');
+        await prisma.channel.update({ where: { id: channel.id }, data: { status: 'ERROR' } });
+        wsService.emitChannelStatus(channel.id, 'ERROR');
         this.reconnectAttempts.delete(channel.id);
+        return;
       }
+      this.triggerReconnect(channel.id);
     });
 
     child.on('error', (err) => {
@@ -1578,6 +2006,9 @@ class FfmpegService {
   /** Clear reconnect backoff so manual Start works after fixing config. */
   public clearReconnectState(channelId: string): void {
     this.reconnectAttempts.delete(channelId);
+    const timer = this.reconnectTimers.get(channelId);
+    if (timer) clearTimeout(timer);
+    this.reconnectTimers.delete(channelId);
   }
 
   // ─── Utilities ───────────────────────────────────────────

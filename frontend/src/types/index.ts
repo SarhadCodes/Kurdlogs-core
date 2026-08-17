@@ -111,6 +111,27 @@ export interface Overlay {
   position: string;
 }
 
+export type GraphicsMode = 'PLAYER' | 'BURN_IN' | 'HYBRID';
+
+export interface GraphicsAsset {
+  id: string;
+  filename: string;
+  mimeType: string;
+  path: string;
+  bytes: number;
+  createdAt: string;
+}
+
+export interface ChannelGraphics {
+  channelId: string;
+  mode: GraphicsMode;
+  enabled: boolean;
+  sceneVersion: number;
+  rendererState: string;
+  lastError?: string | null;
+  scene?: { id: string; document: { canvas: { width: number; height: number; frameRate: number }; nodes: Array<Record<string, unknown>> }; asset?: GraphicsAsset | null } | null;
+}
+
 export interface StreamStats {
   cpu: number;
   ram: number;
@@ -127,8 +148,77 @@ export interface SystemStats {
   ram: number;
   totalMem: number;
   usedMem: number;
+  freeMem: number;
   activeChannels: number;
   uptime: number;
+  processUptime: number;
+  cpuCores: number;
+  loadAverage: number[];
+}
+
+export type StorageStatus = 'HEALTHY' | 'WARNING' | 'CRITICAL';
+export type StorageCleanupTargetId =
+  | 'stream-cache'
+  | 'failed-artifacts'
+  | 'expired-exports'
+  | 'monitoring-history';
+
+export interface StorageCategory {
+  id: string;
+  label: string;
+  color: string;
+  bytes: number;
+  fileCount: number;
+}
+
+export interface StorageCleanupTarget {
+  id: StorageCleanupTargetId;
+  label: string;
+  description: string;
+  bytes: number;
+  fileCount: number;
+  rowCount: number;
+}
+
+export interface StorageReport {
+  generatedAt: string;
+  filesystem: {
+    path: string;
+    totalBytes: number;
+    usedBytes: number;
+    freeBytes: number;
+    availableBytes: number;
+    reservedBytes: number;
+    usagePercent: number;
+    availablePercent: number;
+    status: StorageStatus;
+  };
+  application: {
+    totalBytes: number;
+    fileCount: number;
+    categories: StorageCategory[];
+    otherSystemBytes: number;
+  };
+  cleanup: {
+    reclaimableBytes: number;
+    reclaimableFiles: number;
+    targets: StorageCleanupTarget[];
+  };
+}
+
+export interface StorageCleanupResult {
+  completedAt: string;
+  deletedFiles: number;
+  freedBytes: number;
+  removedRows: number;
+  results: Array<{
+    id: StorageCleanupTargetId;
+    deletedFiles: number;
+    freedBytes: number;
+    removedRows: number;
+    errors: number;
+  }>;
+  storage: StorageReport;
 }
 
 export interface StreamLog {
@@ -286,6 +376,23 @@ export type BlueprintBlockType =
   | 'LOOP';
 
 export type SuperPlayMode = 'COUNT' | 'ALL';
+export type ScheduledContentType = Exclude<BlueprintBlockType, 'SCHEDULE' | 'LOOP'>;
+
+export interface BlueprintSchedulePlaylist {
+  playlistId: string;
+  videosPerTurn?: number;
+  contentType?: ScheduledContentType;
+}
+
+export interface BlueprintScheduleRule {
+  enabled?: boolean;
+  startTime?: string;
+  endTime?: string;
+  contentType?: ScheduledContentType;
+  timezone?: string;
+  exclusive?: boolean;
+  playlists?: BlueprintSchedulePlaylist[];
+}
 
 export interface BlueprintBlock {
   id: string;
@@ -296,6 +403,7 @@ export interface BlueprintBlock {
     selectionMode?: 'RANDOM' | 'SEQUENTIAL';
     repeatCount?: number;
     superPlayMode?: SuperPlayMode;
+    scheduleRules?: BlueprintScheduleRule;
     transitionIn?: {
       mode: 'ALWAYS' | 'EVERY_N_ITEMS' | 'EVERY_N_MINUTES';
       value?: number;

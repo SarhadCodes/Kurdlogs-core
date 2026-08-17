@@ -11,11 +11,23 @@ import {
   BoostNode,
   BoostSummary,
   ApiResponse,
+  StorageCleanupResult,
+  StorageCleanupTargetId,
+  StorageReport,
 } from '../types';
 import type { ChannelPlayUrlsData } from '../utils/channelOutputs';
+import { getApiBaseUrl } from '../config/runtime';
+
+export type SecondaryUser = {
+  id: string;
+  username: string;
+  displayName: string | null;
+  role: string;
+  createdAt: string;
+};
 
 const api = axios.create({
-  baseURL: '/api',
+  baseURL: getApiBaseUrl(),
   timeout: 30_000,
   withCredentials: true,
 });
@@ -37,7 +49,10 @@ api.interceptors.response.use(
     if (code) {
       return Promise.reject({ message: detail, code, status: error.response?.status });
     }
-    return Promise.reject(detail);
+    // Keep the Axios response available to feature-level callers. Converting it
+    // to a bare string hid useful graphics renderer errors behind a generic toast.
+    error.message = detail;
+    return Promise.reject(error);
   }
 );
 
@@ -84,6 +99,11 @@ export const authApi = {
     api.post<any, ApiResponse<User>>('/auth/mfa/disable', data),
   regenerateBackupCodes: (data: { password: string; code: string }) =>
     api.post<any, ApiResponse<{ backupCodes: string[] }>>('/auth/mfa/backup-codes/regenerate', data),
+  getSecondaryUsers: () =>
+    api.get<any, ApiResponse<SecondaryUser[]> & { limit?: number }>('/auth/secondary-users'),
+  createSecondaryUser: (data: { username: string; password: string; displayName?: string }) =>
+    api.post<any, ApiResponse<SecondaryUser> & { limit?: number }>('/auth/secondary-users', data),
+  deleteSecondaryUser: (id: string) => api.delete<any, ApiResponse>(`/auth/secondary-users/${id}`),
 };
 
 export const channelApi = {
@@ -175,6 +195,17 @@ export const overlayApi = {
   delete: (id: string) => api.delete<any, ApiResponse>(`/overlays/${id}`),
 };
 
+export const graphicsApi = {
+  get: (channelId: string) => api.get<any, ApiResponse<import('../types').ChannelGraphics | null>>(`/v1/graphics/channels/${channelId}`),
+  save: (channelId: string, data: Record<string, unknown>) => api.put<any, ApiResponse<import('../types').ChannelGraphics>>(`/v1/graphics/channels/${channelId}`, data),
+  // Burned-in graphics restart the channel. A source reconnect can exceed the
+  // default 30-second request timeout, so wait for the renderer to finish.
+  publish: (channelId: string, commandId: string) => api.post<any, ApiResponse>(`/v1/graphics/channels/${channelId}/publish`, { commandId }, { timeout: 0 }),
+  setVisibility: (channelId: string, visible: boolean, commandId: string) => api.post<any, ApiResponse>(`/v1/graphics/channels/${channelId}/visibility`, { visible, commandId }, { timeout: 0 }),
+  getAssets: () => api.get<any, ApiResponse<import('../types').GraphicsAsset[]>>('/v1/graphics/assets'),
+  uploadAsset: (data: FormData) => api.post<any, ApiResponse<import('../types').GraphicsAsset>>('/v1/graphics/assets', data, { headers: { 'Content-Type': 'multipart/form-data' } }),
+};
+
 export const transcodingApi = {
   getAll: () => api.get<any, ApiResponse<TranscodingProfile[]>>('/transcoding'),
   create: (data: any) => api.post<any, ApiResponse<TranscodingProfile>>('/transcoding', data),
@@ -192,7 +223,18 @@ export const tokenApi = {
 
 export const monitorApi = {
   getSystemStats: () => api.get<any, ApiResponse<SystemStats>>('/monitoring/stats'),
+  getStorage: (force = false) =>
+    api.get<any, ApiResponse<StorageReport>>(`/monitoring/storage${force ? '?force=true' : ''}`),
+  cleanupStorage: (targets: StorageCleanupTargetId[]) =>
+    api.post<any, ApiResponse<StorageCleanupResult>>('/monitoring/storage/cleanup', {
+      targets,
+      confirm: 'CLEAR_STORAGE',
+    }),
   getChannelHealth: () => api.get<any, ApiResponse<import('../types').ChannelHealthReport[]>>('/monitoring/health'),
+  startChannelDiagnostic: (channelId: string) =>
+    api.post<any, ApiResponse<any>>(`/monitoring/diagnostics/${channelId}/start`),
+  getChannelDiagnostic: (channelId: string) =>
+    api.get<any, ApiResponse<any>>(`/monitoring/diagnostics/${channelId}`),
   getLogs: (limit: number = 50) => api.get<any, ApiResponse<StreamLog[]>>(`/monitoring/logs?limit=${limit}`),
   getAppLogs: (limit = 100, category?: string) => {
     const q = new URLSearchParams({ limit: String(limit) });
@@ -317,7 +359,7 @@ export const blueprintApi = {
     api.post<any, ApiResponse<import('../types').PublishBlueprintResult>>(`/blueprints/${id}/publish`, {
       channelId,
       blocks,
-    }),
+    }, { timeout: 0 }),
 };
 
 export const boostApi = {

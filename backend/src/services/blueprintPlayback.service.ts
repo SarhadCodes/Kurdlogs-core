@@ -7,14 +7,18 @@ import { blueprintService } from './blueprint.service';
 import { blueprintWindowAuditService } from './blueprintWindowAudit.service';
 import { blueprintExecutionService } from './blueprintExecution.service';
 import { migrateCursorState } from './blueprintStateMigration';
-import type { BlueprintBlock, BlueprintRuntimeState, ResolvedSegment } from '../types/blueprint.types';
+import type {
+  BlueprintBlock,
+  BlueprintRuntimeState,
+  ResolvedSegment,
+} from '../types/blueprint.types';
 import { probeMediaDurationSec } from './mediaProbe.service';
 import {
   getActivePlaybackTimeSec,
   logPlaybackTimeSource,
   type PlaybackTimeSource,
 } from './playbackClock.service';
-import { playbackSyncService } from './playbackSync.service';
+import { monitorService } from './monitor.service';
 
 export interface BlueprintWindowSegment extends ResolvedSegment {
   videoPath?: string;
@@ -166,7 +170,13 @@ export interface ChannelWindowBuild {
 }
 
 class BlueprintPlaybackService {
-  private readonly windowSize = 24;
+  /**
+   * Compile a full weekly schedule for the live encoder. FFmpeg loops this
+   * manifest internally, so normal end-of-schedule playback never closes the
+   * encoder or interrupts HLS. Explicit operator publishes can still replace
+   * the schedule in a controlled handoff.
+   */
+  private readonly playoutHorizon = '7d' as const;
   private readonly runtimes = new Map<string, BlueprintPlaybackRuntime>();
   private readonly lastCursorPersist = new Map<string, number>();
 
@@ -272,7 +282,9 @@ class BlueprintPlaybackService {
       rt.updatedAt = Date.now();
       this.logWindowReset(channelId, rt, 'stream_started');
       blueprintService.invalidateTimelineCaches(rt.blueprintId, 'CHANNEL_RESTART');
-      playbackSyncService.startMonitoring(channelId, rt.blueprintId);
+      // Playback diagnostics are requested on demand by the operator UI. A
+      // permanent five-second simulator/timeline poll for every on-air
+      // channel competes with FFmpeg on CPU-only servers and can starve HLS.
     }
   }
 
@@ -705,12 +717,24 @@ class BlueprintPlaybackService {
     if (!channel?.useBlueprint || !channel.blueprint) return null;
 
     const blocks = blueprintService.parseBlocksFromJson(channel.blueprint.blocks);
-    const playlistIds = blocks.map((b) => b.config?.playlistId).filter(Boolean) as string[];
+    // A timed Schedule block can rotate several playlists. Load every source
+    // here, not only the legacy top-level config.playlistId, otherwise the
+    // execution engine receives an empty pool and cannot build its concat.
+    const playlistIds = blocks.flatMap((block) => [
+      block.config?.playlistId,
+      ...(block.config?.scheduleRules?.playlists?.map((entry) => entry.playlistId) ?? []),
+    ]).filter((id): id is string => !!id);
     const playlists = await blueprintService.loadPlaylistSources(playlistIds);
 
     const persisted = this.loadPersistedState(channelId);
     const prev = this.runtimes.get(channelId);
+    // A publish can keep the same blueprint ID while replacing its blocks.
+    // Treat that explicit operation as a new schedule: otherwise a running
+    // channel continues building from the old, far-future window cursor and
+    // timed content (for example 20:00–03:00 movies) is skipped until the
+    // stale window eventually rolls over.
     const blueprintChanged =
+      options?.reason === 'blueprint_changed' ||
       (prev && prev.blueprintId !== channel.blueprint.id) ||
       (persisted && persisted.blueprintId !== channel.blueprint.id);
 
@@ -738,17 +762,31 @@ class BlueprintPlaybackService {
           (prev!.segments[0] ? new Date(prev!.segments[0].startsAt).getTime() : scheduleCursorMs)
         : scheduleCursorMs;
 
-    const { segments, state: engineState } = blueprintExecutionService.execute({
+    const simulation = blueprintExecutionService.simulateHorizon({
       blocks,
       playlists,
-      count: this.windowSize,
+      horizon: this.playoutHorizon,
       startTime: new Date(executeStartMs),
       initialState,
       seed: executionSeed,
       source: 'ENGINE',
     });
+    const segments = simulation.segments;
 
     if (segments.length === 0) return null;
+
+    // simulateHorizon intentionally over-generates then trims at the time
+    // boundary. Re-run only the retained count so the persisted cursor points
+    // at the exact last on-air item rather than the discarded look-ahead.
+    const { state: engineState } = blueprintExecutionService.execute({
+      blocks,
+      playlists,
+      count: segments.length,
+      startTime: new Date(executeStartMs),
+      initialState,
+      seed: executionSeed,
+      source: 'ENGINE',
+    });
 
     const lastEndMs = new Date(segments[segments.length - 1].endsAt).getTime();
     scheduleCursorMs = lastEndMs;
@@ -756,12 +794,47 @@ class BlueprintPlaybackService {
     const windowSegments: BlueprintWindowSegment[] = [];
     let content = 'ffconcat version 1.0\n';
     const concatEntries: string[] = [];
+    const compatibility = new Map<string, boolean>();
+    const durations = new Map<string, number | null>();
+    const { ingestService } = await import('./ingest.service');
 
     for (const seg of segments) {
       const pl = seg.playlistId ? playlists.get(seg.playlistId) : undefined;
       const item = pl?.items.find((i) => i.id === seg.itemId);
       if (!item?.videoPath) continue;
-      const probed = await probeMediaDurationSec(item.videoPath);
+      let canonical = compatibility.get(item.videoPath);
+      if (canonical === undefined) {
+        const mediaProbe = await ingestService.probeInput(item.videoPath);
+        canonical = !!mediaProbe && ingestService.isBroadcastCanonical(mediaProbe);
+        compatibility.set(item.videoPath, canonical);
+      }
+      if (!canonical) {
+        const sourcePath = ingestService.resolveSourcePath({
+          id: item.id,
+          videoPath: item.videoPath,
+        });
+        if (sourcePath && seg.playlistId && !ingestService.isProcessing(item.id)) {
+          logger.warn(
+            `[BROADCAST_NORMALIZE] itemId=${item.id} playlistId=${seg.playlistId} ` +
+              `action=reencode_noncanonical path=${item.videoPath}`
+          );
+          ingestService.enqueueIngest({
+            itemId: item.id,
+            playlistId: seg.playlistId,
+            sourcePath,
+            skipBrand: true,
+            jobType: 'INGEST',
+          });
+        }
+        continue;
+      }
+      let probed: number | null;
+      if (durations.has(item.videoPath)) {
+        probed = durations.get(item.videoPath) ?? null;
+      } else {
+        probed = (await probeMediaDurationSec(item.videoPath)) ?? null;
+        durations.set(item.videoPath, probed);
+      }
       const playbackDurationSec = probed ?? item.durationSec ?? seg.durationSec;
       const safePath = item.videoPath.replace(/\\/g, '/').replace(/'/g, "'\\''");
       content += `file '${safePath}'\n`;
@@ -841,6 +914,26 @@ class BlueprintPlaybackService {
     const filePath = this.getBlueprintConcatPath(channelId);
     if (!build) {
       logger.error(`[EXECUTION_ERROR] blockType=window media=none error=No segments generated channelId=${channelId}`);
+      // Never remove a concat file which is still being consumed by the live
+      // encoder. This used to create a race where FFmpeg was healthy until a
+      // schedule became temporarily empty, then died with "No such file".
+      // Preserve the last verified window and let the next scheduled rebuild
+      // replace it atomically instead of taking the channel off air.
+      const activeRuntime = prev ?? this.runtimes.get(channelId);
+      const persistedSegmentCount = persisted?.windowSegments?.length ?? 0;
+      const activeSegmentCount = activeRuntime?.segments.length ?? persistedSegmentCount;
+      if (activeSegmentCount > 0 && fs.existsSync(filePath)) {
+        monitorService.addLog(
+          channelId,
+          'WARN',
+          'Schedule produced no new playable window; keeping the current on-air window until content is available.'
+        );
+        logger.warn(
+          `[WINDOW_PRESERVE] channelId=${channelId} reason=no_new_playable_segments ` +
+            `activeSegments=${activeSegmentCount}`
+        );
+        return filePath;
+      }
       this.runtimes.delete(channelId);
       this.clearPersistedState(channelId);
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
@@ -848,6 +941,7 @@ class BlueprintPlaybackService {
     }
 
     const blueprintChanged =
+      options?.reason === 'blueprint_changed' ||
       (prev && prev.blueprintId !== channel.blueprint.id) ||
       (persisted && persisted.blueprintId !== channel.blueprint.id);
 
@@ -921,8 +1015,11 @@ class BlueprintPlaybackService {
 
     const playlistIds = blueprintService
       .parseBlocksFromJson(channel.blueprint.blocks)
-      .map((b) => b.config?.playlistId)
-      .filter(Boolean) as string[];
+      .flatMap((block) => [
+        block.config?.playlistId,
+        ...(block.config?.scheduleRules?.playlists?.map((entry) => entry.playlistId) ?? []),
+      ])
+      .filter((id): id is string => !!id);
 
     this.savePersistedState(channelId, {
       blueprintId: channel.blueprint.id,
@@ -967,7 +1064,6 @@ class BlueprintPlaybackService {
     if (blueprintId) {
       blueprintService.invalidateTimelineCaches(blueprintId, 'CHANNEL_RESTART');
     }
-    playbackSyncService.stopMonitoring(channelId);
     this.runtimes.delete(channelId);
     this.clearPersistedState(channelId);
   }

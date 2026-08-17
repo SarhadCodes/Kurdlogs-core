@@ -1,5 +1,6 @@
-import { forwardRef, useImperativeHandle, useRef, useEffect, useState, useCallback } from 'react';
+import { forwardRef, useImperativeHandle, useRef, useEffect, useState, useCallback, type ReactNode } from 'react';
 import Hls from 'hls.js';
+import { isApiRequestUrl } from '../config/runtime';
 import * as dashjs from 'dashjs';
 import { Copy, ExternalLink, WifiOff } from 'lucide-react';
 import { useViewerHeartbeat } from '../hooks/useViewerHeartbeat';
@@ -44,6 +45,8 @@ interface LivePlayerProps {
   waitForVideo?: boolean;
   /** Tighter HLS buffer for monitoring. */
   lowLatency?: boolean;
+  /** Controlled-player graphics layer; does not alter the stream or encoder. */
+  graphicsOverlay?: ReactNode;
 }
 
 function formatQualityLabel(level?: { height?: number; name?: string }): string {
@@ -105,6 +108,7 @@ const LivePlayer = forwardRef<LivePlayerHandle, LivePlayerProps>(function LivePl
     playerId,
     waitForVideo = false,
     lowLatency = false,
+    graphicsOverlay,
   },
   ref
 ) {
@@ -263,6 +267,12 @@ const LivePlayer = forwardRef<LivePlayerHandle, LivePlayerProps>(function LivePl
       const manifestUrl = appendStreamAuthToUrl(src, auth);
       const player = dashjs.MediaPlayer().create();
 
+      if (isApiRequestUrl(manifestUrl)) {
+        player.setXHRWithCredentialsForType('MPD', true);
+        player.setXHRWithCredentialsForType('MediaSegment', true);
+        player.setXHRWithCredentialsForType('InitializationSegment', true);
+      }
+
       if (auth.streamToken || auth.accessToken) {
         player.addRequestInterceptor((request) => {
           request.url = appendStreamAuthToUrl(request.url, auth);
@@ -332,7 +342,8 @@ const LivePlayer = forwardRef<LivePlayerHandle, LivePlayerProps>(function LivePl
           xhrSetup: (xhr, url) => {
             const authedUrl = appendStreamAuthToUrl(url, auth);
             const reqUrl = new URL(authedUrl, window.location.origin);
-            xhr.open('GET', reqUrl.pathname + reqUrl.search, true);
+            xhr.open('GET', reqUrl.toString(), true);
+            xhr.withCredentials = isApiRequestUrl(reqUrl.toString());
           },
         });
 
@@ -524,6 +535,7 @@ const LivePlayer = forwardRef<LivePlayerHandle, LivePlayerProps>(function LivePl
           {currentQuality.bitrateKbps ? ` · ${currentQuality.bitrateKbps} kbps` : ''}
         </div>
       )}
+      {graphicsOverlay}
     </div>
   );
 });
