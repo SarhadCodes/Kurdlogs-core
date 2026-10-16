@@ -18,31 +18,16 @@ class WebSocketService {
       cors: {
         origin: parseCorsOrigins(env.CORS_ORIGIN),
         methods: ['GET', 'POST'],
-        credentials: true,
       },
     });
 
     this.io.use((socket, next) => {
-      const headerCookie = socket.handshake.headers.cookie || '';
-      const cookieMatch = headerCookie
-        .split(';')
-        .map((p) => p.trim())
-        .find((p) => p.startsWith(`${env.SESSION_COOKIE_NAME}=`));
-      const cookieToken = cookieMatch
-        ? decodeURIComponent(cookieMatch.slice(env.SESSION_COOKIE_NAME.length + 1))
-        : '';
-      const authToken =
-        typeof socket.handshake.auth?.token === 'string' ? socket.handshake.auth.token : '';
-      const token = cookieToken || authToken;
-
+      const token = socket.handshake.auth.token;
       if (!token) {
         return next(new Error('Authentication error'));
       }
       try {
-        const payload = jwt.verify(token, env.JWT_SECRET) as { purpose?: string };
-        if (payload.purpose === 'mfa_pending') {
-          return next(new Error('Authentication error'));
-        }
+        jwt.verify(token, env.JWT_SECRET);
         next();
       } catch (err) {
         next(new Error('Authentication error'));

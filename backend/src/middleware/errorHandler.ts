@@ -5,13 +5,11 @@ import { logger } from '../utils/logger';
 export class AppError extends Error {
   statusCode: number;
   isOperational: boolean;
-  code?: string;
 
-  constructor(message: string, statusCode: number, extras?: { code?: string }) {
+  constructor(message: string, statusCode: number) {
     super(message);
     this.statusCode = statusCode;
     this.isOperational = true;
-    this.code = extras?.code;
     Error.captureStackTrace(this, this.constructor);
   }
 }
@@ -53,7 +51,6 @@ export const errorHandler = (err: any, req: Request, res: Response, next: NextFu
 
   res.status(error.statusCode || 500).json({
     success: false,
-    error: error.message || 'Server Error',
-    ...(err instanceof AppError && err.code ? { code: err.code } : {}),
+    error: error.message || 'Server Error'
   });
 };

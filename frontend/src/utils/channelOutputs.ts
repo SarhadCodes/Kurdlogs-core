@@ -58,8 +58,9 @@ export interface ChannelPlayUrlsData {
   };
 }
 
-function adminSessionUrlsEnabled(): boolean {
-  return typeof window !== 'undefined';
+function adminJwt(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('auth_token');
 }
 
 function embedUrl(base: string, slug: string, query?: Record<string, string | undefined>): string {
@@ -233,22 +234,23 @@ export function buildChannelOutputSections(
     });
   }
 
-  // ── Admin session (httpOnly cookie; same browser only) ──────
-  if (adminSessionUrlsEnabled()) {
-    const adminHls = `${base}/stream/${slug}/master.m3u8`;
-    const adminDash = `${base}/stream/${slug}/manifest.mpd`;
-    const adminEmbed = embedUrl(base, slug);
+  // ── Admin JWT ───────────────────────────────────────────────
+  const jwt = adminJwt();
+  if (jwt) {
+    const adminHls = `${base}/stream/${slug}/master.m3u8?access_token=${encodeURIComponent(jwt)}`;
+    const adminDash = `${base}/stream/${slug}/manifest.mpd?access_token=${encodeURIComponent(jwt)}`;
+    const adminEmbed = embedUrl(base, slug, { access_token: jwt });
 
     sections.push({
       id: 'admin',
-      title: 'Admin (browser session)',
-      description: 'Uses your httpOnly session cookie — works in this browser only; do not share.',
+      title: 'Admin (your session)',
+      description: 'Dashboard JWT — internal use only; do not share.',
       entries: [
         {
           id: 'admin-hls',
           protocol: 'HLS',
           title: 'HLS',
-          description: 'master.m3u8 (session cookie)',
+          description: 'master.m3u8 with access_token',
           url: adminHls,
           authType: 'admin',
         },
@@ -256,7 +258,7 @@ export function buildChannelOutputSections(
           id: 'admin-dash',
           protocol: 'DASH',
           title: 'DASH',
-          description: 'manifest.mpd (session cookie)',
+          description: 'manifest.mpd with access_token',
           url: adminDash,
           authType: 'admin',
         },
@@ -264,7 +266,7 @@ export function buildChannelOutputSections(
           id: 'admin-embed',
           protocol: 'EMBED',
           title: 'Embed player',
-          description: 'Iframe in this browser session',
+          description: 'Iframe with your session token',
           url: adminEmbed,
           embedCode: iframeFor(adminEmbed),
           authType: 'admin',

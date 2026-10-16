@@ -31,7 +31,6 @@ export interface TokenPayload {
   userId: string;
   username: string;
   role: string;
-  purpose?: 'session' | 'mfa_pending';
 }
 
 export interface AuthRequest extends Request {

@@ -20,29 +20,12 @@ import BenchmarkPage from './pages/BenchmarkPage';
 import BlueprintsPage from './pages/BlueprintsPage';
 import SettingsPage from './pages/SettingsPage';
 import InstallPage from './pages/InstallPage';
-import OnboardingTour from './components/OnboardingTour';
 
 function AuthenticatedApp() {
   useWebSocket();
-  const user = useAuthStore((s) => s.user);
-
-  // Only lock the panel when an account was explicitly flagged to change password
-  // (e.g. admin-created users). Installer admin is not forced to change.
-  if (user?.mustChangePassword) {
-    return (
-      <>
-        <Routes>
-          <Route path="/settings" element={<SettingsPage />} />
-          <Route path="*" element={<Navigate to="/settings" replace />} />
-        </Routes>
-      </>
-    );
-  }
 
   return (
-    <>
-      <OnboardingTour />
-      <Routes>
+    <Routes>
       <Route path="/dashboard" element={<Navigate to="/" replace />} />
       <Route path="/" element={<DashboardPage />} />
       <Route path="/channels" element={<ChannelsPage />} />
@@ -60,8 +43,7 @@ function AuthenticatedApp() {
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/install" element={<InstallPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </>
+    </Routes>
   );
 }
 
@@ -74,7 +56,7 @@ function AppShell() {
 
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center h-screen bg-background">
+      <div className="flex items-center justify-center h-screen bg-black">
         <LoadingSpinner />
       </div>
     );

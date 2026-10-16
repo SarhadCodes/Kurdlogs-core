@@ -8,8 +8,10 @@ class WebSocketService {
   connect() {
     if (this.socket?.connected) return;
 
+    const token = localStorage.getItem('auth_token');
+    
     this.socket = io('/', {
-      withCredentials: true,
+      auth: { token },
       path: '/socket.io',
       transports: ['websocket', 'polling'],
     });
@@ -29,7 +31,7 @@ class WebSocketService {
     this.socket.onAny((event, ...args) => {
       const callbacks = this.subscribers.get(event);
       if (callbacks) {
-        callbacks.forEach((cb) => cb(...args));
+        callbacks.forEach(cb => cb(...args));
       }
     });
   }

@@ -3,8 +3,6 @@ import jwt from 'jsonwebtoken';
 import { env } from '../config/env';
 import { channelService } from '../services/channel.service';
 import { tokenService } from '../services/token.service';
-import { extractAuthToken } from './authCookie';
-import type { TokenPayload } from '../types';
 
 export interface StreamAccessResult {
   allowed: boolean;
@@ -12,15 +10,6 @@ export interface StreamAccessResult {
   appendQuery?: string;
   /** Token validated from /stream/:slug/t/:token/... path */
   tokenInPath?: string;
-}
-
-function verifyAdminSession(token: string): boolean {
-  try {
-    const payload = jwt.verify(token, env.JWT_SECRET) as TokenPayload;
-    return payload.purpose !== 'mfa_pending' && Boolean(payload.userId);
-  } catch {
-    return false;
-  }
 }
 
 export async function resolveStreamAccess(
@@ -60,17 +49,29 @@ export async function resolveStreamAccess(
     }
   }
 
-  // Prefer httpOnly session cookie (no JWT echo into playlists / logs / Referer).
-  const sessionToken = extractAuthToken(req);
-  if (sessionToken && verifyAdminSession(sessionToken)) {
-    return { allowed: true };
-  }
-
-  // Legacy query access_token — accepted but not rewritten into child URLs.
   const accessToken =
     typeof req.query.access_token === 'string' ? req.query.access_token : undefined;
-  if (accessToken && verifyAdminSession(accessToken)) {
-    return { allowed: true };
+  if (accessToken) {
+    try {
+      jwt.verify(accessToken, env.JWT_SECRET);
+      return {
+        allowed: true,
+        appendQuery: `access_token=${encodeURIComponent(accessToken)}`,
+      };
+    } catch {
+      /* invalid admin token */
+    }
+  }
+
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith('Bearer ')) {
+    try {
+      jwt.verify(authHeader.slice(7), env.JWT_SECRET);
+      const appendQuery = `access_token=${encodeURIComponent(authHeader.slice(7))}`;
+      return { allowed: true, appendQuery };
+    } catch {
+      /* invalid */
+    }
   }
 
   return { allowed: false };

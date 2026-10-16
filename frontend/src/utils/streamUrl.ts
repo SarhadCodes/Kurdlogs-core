@@ -27,7 +27,10 @@ export function buildStreamUrl(
     const base = `/stream/${slug}/t/${encodeURIComponent(streamToken)}/${manifest}`;
     return vsid ? `${base}?vsid=${encodeURIComponent(vsid)}` : base;
   }
-  // Admin preview uses httpOnly session cookie (same-origin) — never put JWT in the URL.
+  const auth = localStorage.getItem('auth_token');
+  if (auth) {
+    return `/stream/${slug}/${manifest}?access_token=${encodeURIComponent(auth)}&vsid=${encodeURIComponent(vsid)}`;
+  }
   return `/stream/${slug}/${manifest}${vsidSuffix}`;
 }
 

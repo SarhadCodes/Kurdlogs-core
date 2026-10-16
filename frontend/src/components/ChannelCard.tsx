@@ -145,15 +145,15 @@ export default function ChannelCard({ channel, onClick, onDelete }: ChannelCardP
     <>
     <div
       onClick={onClick}
-      className="group cursor-pointer overflow-hidden rounded-xl border border-border bg-card/80 shadow-sm transition-colors hover:border-border/80 hover:bg-card"
+      className="bg-[#111111] border border-[#222222] rounded-xl overflow-hidden hover:border-[#444444] transition-all cursor-pointer group"
     >
       {/* Viewer Bar — stop clicks here so card navigation does not fire */}
       <div
-        className="flex items-center justify-between border-b border-border bg-muted/40 px-3 py-1.5"
+        className="flex items-center justify-between px-3 py-1.5 bg-[#0a0a0a] border-b border-[#1a1a1a]"
         onClick={(e) => e.stopPropagation()}
         onKeyDown={(e) => e.stopPropagation()}
       >
-        <span className="text-[10px] font-medium uppercase tracking-wider text-muted-foreground">Live Preview</span>
+        <span className="text-[10px] text-gray-500 uppercase tracking-wider font-medium">Live Preview</span>
         <button
           type="button"
           disabled={!isLive}
@@ -212,38 +212,38 @@ export default function ChannelCard({ channel, onClick, onDelete }: ChannelCardP
       {/* Channel Info */}
       <div className="p-3.5">
         {/* Name + Status */}
-        <div className="mb-2.5 flex items-center justify-between">
-          <h3 className="truncate pr-2 font-display text-sm font-semibold text-foreground">{channel.name}</h3>
-          <span className={`inline-flex items-center gap-1.5 rounded-md border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider ${cfg.bg}`}>
-            <span className={`h-1.5 w-1.5 rounded-full ${cfg.dot} ${status === 'ONLINE' ? 'animate-pulse' : ''}`} />
+        <div className="flex items-center justify-between mb-2.5">
+          <h3 className="text-white font-semibold text-sm truncate pr-2">{channel.name}</h3>
+          <span className={`inline-flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider px-2 py-0.5 rounded-full border ${cfg.bg}`}>
+            <span className={`w-1.5 h-1.5 rounded-full ${cfg.dot} ${status === 'ONLINE' ? 'animate-pulse' : ''}`} />
             {cfg.label}
           </span>
         </div>
 
         {/* Tags */}
-        <div className="mb-3 flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1 rounded-md bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+        <div className="flex items-center gap-2 mb-3 flex-wrap">
+          <span className="inline-flex items-center gap-1 text-[10px] text-gray-500 bg-[#1a1a1a] px-2 py-0.5 rounded">
             {channel.useBlueprint ? (
               <>
-                <Blocks className="h-3 w-3 text-muted-foreground" />
-                <span className="text-muted-foreground">Blueprint</span>
+                <Blocks className="w-3 h-3 text-violet-400" />
+                <span className="text-violet-400/90">Blueprint</span>
               </>
             ) : channel.isPlaylistChannel ? (
               <>
-                <ListVideo className="h-3 w-3" />
+                <ListVideo className="w-3 h-3" />
                 Playlist
               </>
             ) : (
               <>
-                <Radio className="h-3 w-3" />
+                <Radio className="w-3 h-3" />
                 Live
               </>
             )}
           </span>
-          <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+          <span className="text-[10px] text-gray-500 bg-[#1a1a1a] px-2 py-0.5 rounded">
             {channel.outputType}
           </span>
-          <span className="rounded-md bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">
+          <span className="text-[10px] text-gray-500 bg-[#1a1a1a] px-2 py-0.5 rounded">
             {getResolution(channel)}
           </span>
         </div>
@@ -281,12 +281,12 @@ function StatItem({ icon, label, value, valueColor, colSpan }: {
   icon: React.ReactNode; label: string; value: string; valueColor?: string; colSpan?: boolean;
 }) {
   return (
-    <div className={`flex items-center justify-between ${colSpan ? 'col-span-2 mt-1 border-t border-border pt-1' : ''}`}>
-      <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+    <div className={`flex items-center justify-between ${colSpan ? 'col-span-2 pt-1 mt-1 border-t border-[#1a1a1a]' : ''}`}>
+      <span className="flex items-center gap-1.5 text-[11px] text-gray-500">
         {icon}
         {label}
       </span>
-      <span className={`font-mono text-[11px] ${valueColor || 'text-foreground/80'}`}>{value}</span>
+      <span className={`text-[11px] font-mono ${valueColor || 'text-gray-300'}`}>{value}</span>
     </div>
   );
 }

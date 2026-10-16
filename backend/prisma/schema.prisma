@@ -161,12 +161,7 @@ model User {
   email              String?  @unique
   passwordHash       String
   role               Role     @default(ADMIN)
-  displayName        String?
-  avatarUrl          String?
   mustChangePassword Boolean  @default(true)
-  mfaEnabled         Boolean  @default(false)
-  mfaSecret          String?
-  mfaBackupCodes     String?
   createdAt          DateTime @default(now())
   updatedAt          DateTime @updatedAt
 }
