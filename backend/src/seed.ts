@@ -5,59 +5,32 @@ import { logger } from './utils/logger';
 
 const prisma = new PrismaClient();
 
-const DEFAULT_ADMIN_PASSWORD = 'Kurdlogs!';
-
 async function main() {
   logger.info('Starting seed...');
 
+  // Create default admin user
   const adminExists = await prisma.user.findUnique({
-    where: { username: 'admin' },
+    where: { username: 'admin' }
   });
 
   if (!adminExists) {
-    const fromEnv = (process.env.ADMIN_INITIAL_PASSWORD || '').trim();
-    const password = fromEnv || DEFAULT_ADMIN_PASSWORD;
-    const salt = await bcrypt.genSalt(12);
-    const passwordHash = await bcrypt.hash(password, salt);
+    const salt = await bcrypt.genSalt(10);
+    const passwordHash = await bcrypt.hash('admin123', salt);
 
     await prisma.user.create({
       data: {
         username: 'admin',
         passwordHash,
         role: 'ADMIN',
-        mustChangePassword: false,
-        mfaEnabled: false,
-      },
+        mustChangePassword: true
+      }
     });
-
-    logger.info('Created default admin user (username: admin)');
-    logger.info('============================================================');
-    logger.info(`ADMIN PASSWORD: ${password}`);
-    logger.info('Also printed by the installer and stored as ADMIN_INITIAL_PASSWORD.');
-    logger.info('============================================================');
+    logger.info('Created default admin user (admin / admin123)');
   } else {
-    const fromEnv = (process.env.ADMIN_INITIAL_PASSWORD || '').trim();
-    const syncRequested =
-      process.env.SYNC_ADMIN_PASSWORD === '1' || process.env.SYNC_ADMIN_PASSWORD === 'true';
-    if (syncRequested && fromEnv) {
-      const passwordHash = await bcrypt.hash(fromEnv, 12);
-      await prisma.user.update({
-        where: { username: 'admin' },
-        data: {
-          passwordHash,
-          mustChangePassword: false,
-          role: 'ADMIN',
-          mfaEnabled: false,
-          mfaSecret: null,
-          mfaBackupCodes: null,
-        },
-      });
-      logger.info('Synced admin password from ADMIN_INITIAL_PASSWORD (installer)');
-    } else {
-      logger.info('Admin user already exists');
-    }
+    logger.info('Admin user already exists');
   }
 
+  // Create default transcoding profiles
   const profilesCount = await prisma.transcodingProfile.count();
   if (profilesCount === 0) {
     for (const preset of TRANSCODING_PRESETS) {
@@ -68,8 +41,8 @@ async function main() {
           videoBitrate: preset.videoBitrate,
           audioBitrate: preset.audioBitrate,
           fps: preset.fps,
-          isDefault: true,
-        },
+          isDefault: true
+        }
       });
     }
     logger.info('Created default transcoding profiles');

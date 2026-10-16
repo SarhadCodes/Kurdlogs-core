@@ -1,39 +1,23 @@
 import { PrismaClient } from '@prisma/client';
-import bcrypt from 'bcryptjs';import { logger } from '../utils/logger';
+import bcrypt from 'bcryptjs';
+import { logger } from '../utils/logger';
 
 const prisma = new PrismaClient();
-
-const DEFAULT_ADMIN_PASSWORD = 'Kurdlogs!';
-
-function generatePassword(): string {
-  return DEFAULT_ADMIN_PASSWORD;
-}
+const password = process.argv[2] || 'admin123';
 
 async function main() {
-  const password =
-    (process.argv[2] || '').trim() ||
-    (process.env.ADMIN_INITIAL_PASSWORD || '').trim() ||
-    generatePassword();
-  const passwordHash = await bcrypt.hash(password, 12);
+  const passwordHash = await bcrypt.hash(password, 10);
   const user = await prisma.user.upsert({
     where: { username: 'admin' },
-    update: {
-      passwordHash,
-      mustChangePassword: false,
-      role: 'ADMIN',
-      mfaEnabled: false,
-      mfaSecret: null,
-      mfaBackupCodes: null,
-    },
+    update: { passwordHash, mustChangePassword: true, role: 'ADMIN' },
     create: {
       username: 'admin',
       passwordHash,
       role: 'ADMIN',
-      mustChangePassword: false,
+      mustChangePassword: true,
     },
   });
-  logger.info(`Admin user ready: ${user.username}`);
-  logger.info(`Password: ${password}`);
+  logger.info(`Admin user ready: ${user.username} / ${password}`);
 }
 
 main()

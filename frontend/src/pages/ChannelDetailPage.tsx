@@ -1,10 +1,11 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
-import { useParams, useNavigate, Link, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import {
   Play,
   Square,
   RotateCw,
   ArrowLeft,
+  Tv,
   Settings,
   Activity,
   Layers,
@@ -19,11 +20,10 @@ import {
   Globe,
   Users,
   Blocks,
-  Key,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { channelApi, playlistApi, blueprintApi, monitorApi, tokenApi } from '../services/api';
-import { Playlist, ChannelBlueprint, Token } from '../types';
+import { channelApi, playlistApi, blueprintApi, monitorApi } from '../services/api';
+import { Playlist, ChannelBlueprint } from '../types';
 import { Channel, StreamStats, StreamLog, ChannelHealthReport } from '../types';
 import { useChannelStore } from '../stores/channelStore';
 import Layout from '../components/Layout';
@@ -36,7 +36,6 @@ import LivePlayer, {
 } from '../components/LivePlayer';
 import PreviewTestPanel from '../components/PreviewTestPanel';
 import HybridChannelPanel from '../components/HybridChannelPanel';
-import ChannelOutputPanel from '../components/ChannelOutputPanel';
 import ViewerMapFullscreen from '../components/ViewerMapFullscreen';
 import type { ViewerLocation, ViewerMapPayload } from '../types/viewer';
 import { wsService } from '../services/websocket';
@@ -45,36 +44,26 @@ import { setViewerStreamMeta } from '../utils/viewerSession';
 import StatusBadge from '../components/StatusBadge';
 import LogViewer from '../components/LogViewer';
 import Modal from '../components/Modal';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import {
   PLAYER_ENGINE_KEY,
   PLAYER_ENGINE_OPTIONS,
   type PlayerEngine,
 } from '../types/player';
-import type { ChannelPlayUrlsData } from '../utils/channelOutputs';
+
 function getChannelModeDisplay(channel: Channel) {
   if (channel.useBlueprint) {
-    return { label: 'Blueprint', Icon: Blocks, color: 'text-muted-foreground' };
+    return { label: 'Blueprint', Icon: Blocks, color: 'text-violet-400' };
   }
   if (channel.isPlaylistChannel) {
-    return { label: 'Playlist', Icon: ListVideo, color: 'text-muted-foreground' };
+    return { label: 'Playlist', Icon: ListVideo, color: 'text-blue-400' };
   }
-  return { label: 'Live Feed', Icon: Radio, color: 'text-muted-foreground' };
+  return { label: 'Live Feed', Icon: Radio, color: 'text-green-400' };
 }
 
 const ChannelDetailPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [searchParams, setSearchParams] = useSearchParams();
   const { stats, updateChannelStats } = useChannelStore();
-
-  const tabParam = searchParams.get('tab');
-  const activeTab =
-    tabParam === 'outputs' || tabParam === 'settings' || tabParam === 'logs' || tabParam === 'preview'
-      ? tabParam
-      : 'preview';
 
   const [channel, setChannel] = useState<Channel | null>(null);
   const [loading, setLoading] = useState(true);
@@ -92,8 +81,6 @@ const ChannelDetailPage: React.FC = () => {
   const [viewers, setViewers] = useState(0);
   const [viewerLocations, setViewerLocations] = useState<ViewerLocation[]>([]);
   const [viewerMapOpen, setViewerMapOpen] = useState(false);
-  const [activeToken, setActiveToken] = useState<Token | null>(null);
-  const [playUrls, setPlayUrls] = useState<ChannelPlayUrlsData | null>(null);
 
   const [showSwitchModal, setShowSwitchModal] = useState(false);
   const [playlists, setPlaylists] = useState<Playlist[]>([]);
@@ -167,27 +154,11 @@ const ChannelDetailPage: React.FC = () => {
     }
   }, [id]);
 
-  const fetchOutputs = useCallback(async () => {
-    if (!id) return;
-    try {
-      const [tokensRes, playUrlsRes] = await Promise.all([
-        tokenApi.getAll(),
-        channelApi.getPlayUrls(id),
-      ]);
-      setPlayUrls(playUrlsRes.data || null);
-      const token = (tokensRes.data || []).find((t) => t.channelId === id && t.isActive);
-      setActiveToken(token || null);
-    } catch {
-      // Outputs are optional for the detail view
-    }
-  }, [id]);
-
   useEffect(() => {
     fetchChannel();
     fetchStats();
     fetchLogs();
     fetchLivePlayback();
-    fetchOutputs();
     blueprintApi.getAll().then((res) => {
       if (res.data) setBlueprints(res.data);
     }).catch(() => {});
@@ -199,7 +170,7 @@ const ChannelDetailPage: React.FC = () => {
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [fetchChannel, fetchStats, fetchLogs, fetchLivePlayback, fetchOutputs]);
+  }, [fetchChannel, fetchStats, fetchLogs, fetchLivePlayback]);
 
   useEffect(() => {
     if (channel?.blueprintId) setSelectedBlueprintId(channel.blueprintId);
@@ -264,10 +235,7 @@ const ChannelDetailPage: React.FC = () => {
           toast.success('Channel restarting...');
           break;
       }
-      setTimeout(() => {
-        fetchChannel();
-        fetchOutputs();
-      }, 1500);
+      setTimeout(fetchChannel, 1500);
     } catch (err: any) {
       toast.error(`Failed to ${action} channel`);
     } finally {
@@ -437,155 +405,142 @@ const ChannelDetailPage: React.FC = () => {
     <Layout>
       <div className="space-y-6">
         <div className="flex flex-col gap-4">
-          <div className="flex min-w-0 items-start gap-3">
-            <Button
+          <div className="flex items-start gap-3 min-w-0">
+            <button
               type="button"
-              variant="ghost"
-              size="icon"
               onClick={() => navigate('/channels')}
+              className="p-2.5 shrink-0 hover:bg-[#1a1a1a] rounded-md transition-colors min-h-[44px] min-w-[44px] flex items-center justify-center"
               aria-label="Back to channels"
             >
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
+              <ArrowLeft className="w-5 h-5 text-gray-400" />
+            </button>
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-                <h1 className="font-display text-xl font-semibold tracking-tight text-foreground break-words sm:text-2xl">
-                  {channel.name}
-                </h1>
+                <h1 className="text-xl sm:text-2xl font-bold text-white break-words">{channel.name}</h1>
                 <StatusBadge status={channel.status} />
               </div>
-              <p className="mt-0.5 font-mono text-sm text-muted-foreground break-all">/{channel.slug}</p>
+              <p className="text-gray-500 text-sm mt-0.5 break-all">/{channel.slug}</p>
             </div>
             {channel.status === 'ONLINE' && (
-              <Button
+              <button
                 type="button"
-                variant="secondary"
                 onClick={() => setViewerMapOpen(true)}
+                className="shrink-0 flex items-center gap-2 px-3 py-2 rounded-lg border border-[#30363d] bg-[#161b22] text-sm text-[#8b949e] hover:text-[#e6edf3] hover:border-[#484f58] hover:bg-[#21262d] transition-colors min-h-[44px]"
                 title="Open viewer map"
               >
-                <Globe className="h-4 w-4 text-primary" />
-                <Users className="h-4 w-4" />
+                <Globe className="w-4 h-4 text-emerald-400" />
+                <Users className="w-4 h-4" />
                 <span className="font-mono">{viewers}</span>
-                <span className="hidden text-xs text-muted-foreground sm:inline">viewers</span>
-              </Button>
+                <span className="text-gray-500 text-xs hidden sm:inline">viewers</span>
+              </button>
             )}
           </div>
 
           <div className="flex flex-wrap gap-2">
-            <Button
+            <Link
+              to={`/channels/${id}/outputs`}
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-[#1a1a1a] text-white text-sm font-medium rounded-md border border-[#333] hover:border-[#555] transition-colors min-h-[44px] flex-1 sm:flex-none"
+            >
+              <Link2 className="w-4 h-4 shrink-0" />
+              Output links
+            </Link>
+            <button
               type="button"
               onClick={() => handleAction('start')}
               disabled={actionLoading !== null || channel.status === 'ONLINE'}
-              className="flex-1 sm:flex-none"
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-white text-black text-sm font-medium rounded-md hover:bg-gray-200 transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] flex-1 sm:flex-none"
             >
               {actionLoading === 'start' ? (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-primary-foreground/30 border-t-primary-foreground" />
+                <div className="w-4 h-4 border-2 border-black/30 border-t-black rounded-full animate-spin" />
               ) : (
-                <Play className="h-4 w-4 shrink-0" />
+                <Play className="w-4 h-4 shrink-0" />
               )}
               Start
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant="secondary"
               onClick={() => handleAction('stop')}
               disabled={actionLoading !== null || channel.status === 'OFFLINE'}
-              className="flex-1 sm:flex-none"
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-[#222222] text-white text-sm rounded-md hover:bg-[#2a2a2a] border border-[#333333] transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] flex-1 sm:flex-none"
             >
               {actionLoading === 'stop' ? (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" />
+                <div className="w-4 h-4 border-2 border-gray-500/30 border-t-gray-300 rounded-full animate-spin" />
               ) : (
-                <Square className="h-4 w-4 shrink-0" />
+                <Square className="w-4 h-4 shrink-0" />
               )}
               Stop
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant="secondary"
               onClick={() => handleAction('restart')}
               disabled={actionLoading !== null || channel.status === 'OFFLINE'}
-              className="flex-1 sm:flex-none"
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-[#222222] text-white text-sm rounded-md hover:bg-[#2a2a2a] border border-[#333333] transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] flex-1 sm:flex-none"
             >
               {actionLoading === 'restart' ? (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" />
+                <div className="w-4 h-4 border-2 border-gray-500/30 border-t-gray-300 rounded-full animate-spin" />
               ) : (
-                <RotateCw className="h-4 w-4 shrink-0" />
+                <RotateCw className="w-4 h-4 shrink-0" />
               )}
               <span className="hidden sm:inline">Restart</span>
               <span className="sm:hidden">Retry</span>
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant="secondary"
               onClick={openSwitchModal}
               disabled={actionLoading !== null}
-              className="flex-1 sm:flex-none"
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-[#222222] text-white text-sm rounded-md hover:bg-[#2a2a2a] border border-[#333333] transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] flex-1 sm:flex-none"
               title={channel.isPlaylistChannel ? 'Switch to Live Feed' : 'Switch to Playlist'}
             >
-              <ArrowRightLeft className="h-4 w-4 shrink-0" />
+              <ArrowRightLeft className="w-4 h-4 shrink-0" />
               <span className="hidden sm:inline">Switch Mode</span>
               <span className="sm:hidden">Switch</span>
-            </Button>
-            <Button
+            </button>
+            <button
               type="button"
-              variant="destructive"
               onClick={handleDelete}
               disabled={actionLoading !== null}
-              className="w-full sm:w-auto"
+              className="flex items-center justify-center gap-2 px-3 sm:px-4 py-2.5 bg-red-500/10 text-red-500 text-sm rounded-md hover:bg-red-500/20 border border-red-500/20 transition-colors disabled:opacity-40 disabled:cursor-not-allowed min-h-[44px] w-full sm:w-auto"
             >
               {actionLoading === 'delete' ? (
-                <div className="h-4 w-4 animate-spin rounded-full border-2 border-destructive-foreground/30 border-t-destructive-foreground" />
+                <div className="w-4 h-4 border-2 border-red-500/30 border-t-red-500 rounded-full animate-spin" />
               ) : (
-                <Trash2 className="h-4 w-4 shrink-0" />
+                <Trash2 className="w-4 h-4 shrink-0" />
               )}
               Delete
-            </Button>
+            </button>
           </div>
         </div>
 
-        <Tabs
-          value={activeTab}
-          onValueChange={(value) => {
-            const next = new URLSearchParams(searchParams);
-            if (value === 'preview') next.delete('tab');
-            else next.set('tab', value);
-            setSearchParams(next, { replace: true });
-            if (value === 'outputs') void fetchOutputs();
-          }}
-          className="w-full"
-        >
-          <TabsList className="grid w-full grid-cols-2 sm:grid-cols-4 sm:w-auto sm:inline-flex">
-            <TabsTrigger value="preview">Preview</TabsTrigger>
-            <TabsTrigger value="outputs">Output links</TabsTrigger>
-            <TabsTrigger value="settings">Settings</TabsTrigger>
-            <TabsTrigger value="logs">Logs</TabsTrigger>
-          </TabsList>
-
-          <TabsContent value="preview" className="mt-4">
-            <Card className="overflow-hidden bg-card/80">
-              <CardHeader className="flex flex-col gap-3 border-b border-border sm:flex-row sm:items-center sm:justify-between">
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left Column - Player + Output */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Live Player */}
+            <div className="bg-[#111111] border border-[#333333] rounded-lg overflow-hidden">
+              <div className="px-4 py-3 border-b border-[#333333] flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                 <div>
-                  <CardTitle className="text-sm font-medium">Preview</CardTitle>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
+                  <h3 className="text-sm font-medium text-white">Preview</h3>
+                  <p className="text-xs text-gray-500 mt-0.5">
                     {PLAYER_ENGINE_OPTIONS.find((o) => o.id === playerEngine)?.description}
                   </p>
                 </div>
                 <div className="flex flex-wrap gap-1">
                   {PLAYER_ENGINE_OPTIONS.map((option) => (
-                    <Button
-                      key={option.id}
-                      type="button"
-                      size="sm"
-                      variant={playerEngine === option.id ? 'default' : 'secondary'}
-                      title={option.description}
-                      onClick={() => handlePlayerEngineChange(option.id)}
-                      className="h-8 px-2.5 text-xs"
-                    >
-                      {option.label}
-                    </Button>
+                      <button
+                        key={option.id}
+                        type="button"
+                        title={option.description}
+                        onClick={() => handlePlayerEngineChange(option.id)}
+                        className={`px-2.5 py-1.5 text-xs font-medium rounded-md border transition-colors ${
+                          playerEngine === option.id
+                            ? 'bg-white text-black border-white'
+                            : 'bg-[#1a1a1a] text-gray-400 border-[#333] hover:text-white hover:border-[#555]'
+                        }`}
+                      >
+                        {option.label}
+                      </button>
                   ))}
                 </div>
-              </CardHeader>
+              </div>
               <div className="aspect-video bg-black">
                 {channel.status === 'ONLINE' ? (
                   <LivePlayer
@@ -600,8 +555,8 @@ const ChannelDetailPage: React.FC = () => {
                     onCanManualQuality={setCanManualQuality}
                   />
                 ) : (
-                  <div className="flex h-full w-full flex-col items-center justify-center text-muted-foreground">
-                    <WifiOff className="mb-3 h-12 w-12" />
+                  <div className="w-full h-full flex flex-col items-center justify-center text-gray-600">
+                    <WifiOff className="w-12 h-12 mb-3" />
                     <p className="text-sm">Channel is {channel.status.toLowerCase()}</p>
                   </div>
                 )}
@@ -618,84 +573,39 @@ const ChannelDetailPage: React.FC = () => {
                   video={previewVideo}
                 />
               )}
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="outputs" className="mt-4">
-            <div className="space-y-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex flex-wrap items-center gap-2">
-                  <Link2 className="h-4 w-4 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">/{channel.slug}</span>
-                  {activeToken ? (
-                    <span className="rounded bg-emerald-400/10 px-2 py-0.5 text-xs text-emerald-300/90">
-                      Active stream token
-                    </span>
-                  ) : (
-                    <span className="rounded bg-muted px-2 py-0.5 text-xs text-muted-foreground">
-                      No active token
-                    </span>
-                  )}
-                </div>
-                <Button asChild variant="secondary" size="sm">
-                  <Link to="/tokens">
-                    <Key className="h-3.5 w-3.5" />
-                    Manage tokens
-                  </Link>
-                </Button>
-              </div>
-
-              {playUrls?.streamReady === false && (
-                <div className="rounded-lg border border-border bg-muted/30 px-4 py-3 text-sm text-muted-foreground">
-                  Stream files are not on the server yet. Click <strong className="text-foreground">Start</strong> or{' '}
-                  <strong className="text-foreground">Restart</strong>, wait until the preview plays, then use these
-                  links.
-                  {playUrls.tokenProtected && (
-                    <>
-                      {' '}
-                      This channel has token protection — use the <strong className="text-foreground">With stream token</strong>{' '}
-                      URLs in VLC, not the public links.
-                    </>
-                  )}
-                </div>
-              )}
-
-              <ChannelOutputPanel channel={channel} activeToken={activeToken} playUrls={playUrls} />
             </div>
-          </TabsContent>
 
-          <TabsContent value="logs" className="mt-4">
-            <Card className="bg-card/80">
-              <CardHeader className="flex flex-row items-center justify-between gap-3 border-b border-border">
-                <CardTitle className="text-sm font-medium">Recent Logs</CardTitle>
-                <Button
+            {/* Logs */}
+            <div className="bg-[#111111] border border-[#333333] rounded-lg">
+              <div className="px-4 py-3 border-b border-[#333333] flex items-center justify-between gap-3">
+                <h3 className="text-sm font-medium text-white">Recent Logs</h3>
+                <button
                   type="button"
-                  variant="secondary"
-                  size="sm"
                   onClick={handleClearLogs}
                   disabled={clearingLogs || logs.length === 0}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md border border-[#444] text-gray-300 hover:text-white hover:border-[#666] disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   {clearingLogs ? (
-                    <div className="h-3.5 w-3.5 animate-spin rounded-full border-2 border-muted-foreground/30 border-t-foreground" />
+                    <div className="w-3.5 h-3.5 border-2 border-gray-500/30 border-t-gray-300 rounded-full animate-spin" />
                   ) : (
-                    <Eraser className="h-3.5 w-3.5" />
+                    <Eraser className="w-3.5 h-3.5" />
                   )}
                   Clear all
-                </Button>
-              </CardHeader>
-              <CardContent className="p-4">
+                </button>
+              </div>
+              <div className="p-4">
                 <LogViewer logs={logs} />
-              </CardContent>
-            </Card>
-          </TabsContent>
+              </div>
+            </div>
+          </div>
 
-          <TabsContent value="settings" className="mt-4">
-            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+          {/* Right Column - Details + Stats */}
+          <div className="space-y-4">
             {/* Stream Details */}
-            <div className="rounded-xl border border-border bg-card/80 p-4">
-              <div className="mb-4 flex items-center gap-2">
-                <Settings className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium text-foreground">Stream Details</h3>
+            <div className="bg-[#111111] border border-[#333333] rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Settings className="w-4 h-4 text-gray-400" />
+                <h3 className="text-sm font-medium text-white">Stream Details</h3>
               </div>
               <div className="space-y-3">
                 <DetailRow
@@ -705,7 +615,7 @@ const ChannelDetailPage: React.FC = () => {
                     const ModeIcon = mode.Icon;
                     return (
                       <span className="flex items-center gap-1.5">
-                        <ModeIcon className={`h-3 w-3 ${mode.color}`} />
+                        <ModeIcon className={`w-3 h-3 ${mode.color}`} />
                         <span className={mode.color}>{mode.label}</span>
                       </span>
                     );
@@ -719,15 +629,15 @@ const ChannelDetailPage: React.FC = () => {
                         <span
                           className={
                             livePlayback.playbackSource === 'BLUEPRINT'
-                              ? 'font-medium text-foreground'
-                              : 'font-medium text-foreground/80'
+                              ? 'text-violet-400 font-medium'
+                              : 'text-blue-400 font-medium'
                           }
                         >
                           {livePlayback.playbackSource}
                           {livePlayback.blueprintName ? ` · ${livePlayback.blueprintName}` : ''}
                         </span>
                         {livePlayback.currentAsset && (
-                          <span className="max-w-[180px] truncate text-xs text-muted-foreground" title={livePlayback.currentAsset}>
+                          <span className="text-xs text-gray-500 truncate max-w-[180px]" title={livePlayback.currentAsset}>
                             Now: {livePlayback.currentAsset}
                           </span>
                         )}
@@ -736,32 +646,32 @@ const ChannelDetailPage: React.FC = () => {
                   />
                 )}
                 {channel.isPlaylistChannel && (
-                  <div className="space-y-3 border-t border-border pt-2">
-                    <p className="text-xs uppercase tracking-wide text-muted-foreground">Playback mode</p>
+                  <div className="pt-2 border-t border-[#222] space-y-3">
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Playback mode</p>
                     <div className="flex flex-col gap-2">
-                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <input
                           type="radio"
                           name="playbackMode"
                           checked={!channel.useBlueprint}
                           disabled={playbackModeBusy}
                           onChange={() => handlePlaybackMode('playlist')}
-                          className="accent-primary"
+                          className="accent-white"
                         />
-                        <span className="text-foreground/80">Playlist</span>
-                        <span className="text-xs text-muted-foreground">— fixed playlist order</span>
+                        <span className="text-gray-300">Playlist</span>
+                        <span className="text-gray-600 text-xs">— fixed playlist order</span>
                       </label>
-                      <label className="flex cursor-pointer items-center gap-2 text-sm">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <input
                           type="radio"
                           name="playbackMode"
                           checked={!!channel.useBlueprint}
                           disabled={playbackModeBusy}
                           onChange={() => handlePlaybackMode('blueprint')}
-                          className="accent-primary"
+                          className="accent-violet-500"
                         />
-                        <span className="text-foreground/80">Blueprint</span>
-                        <span className="text-xs text-muted-foreground">— dynamic block engine</span>
+                        <span className="text-violet-300">Blueprint</span>
+                        <span className="text-gray-600 text-xs">— dynamic block engine</span>
                       </label>
                     </div>
                     {channel.useBlueprint && (
@@ -773,7 +683,7 @@ const ChannelDetailPage: React.FC = () => {
                             handlePlaybackMode('blueprint');
                           }
                         }}
-                        className="w-full rounded-md border border-input bg-background px-2 py-1.5 text-xs text-foreground"
+                        className="w-full px-2 py-1.5 bg-black border border-[#333] rounded text-xs text-white"
                       >
                         <option value="">Select blueprint…</option>
                         {blueprints.map((bp) => (
@@ -784,10 +694,10 @@ const ChannelDetailPage: React.FC = () => {
                       </select>
                     )}
                     {channel.useBlueprint && channel.blueprint?.name && (
-                      <p className="text-xs text-muted-foreground">Active: {channel.blueprint.name}</p>
+                      <p className="text-xs text-violet-400/80">Active: {channel.blueprint.name}</p>
                     )}
                     {channel.useBlueprint && (
-                      <div className="mt-4 border-t border-border pt-4">
+                      <div className="mt-4 pt-4 border-t border-[#333]">
                         <HybridChannelPanel
                           channelId={channel.id}
                           channelSlug={channel.slug}
@@ -808,9 +718,9 @@ const ChannelDetailPage: React.FC = () => {
                   value={
                     <span className="flex items-center gap-1.5">
                       {channel.autoReconnect ? (
-                        <Wifi className="h-3 w-3 text-emerald-500" />
+                        <Wifi className="w-3 h-3 text-green-500" />
                       ) : (
-                        <WifiOff className="h-3 w-3 text-muted-foreground" />
+                        <WifiOff className="w-3 h-3 text-gray-500" />
                       )}
                       {channel.autoReconnect ? 'Yes' : 'No'}
                     </span>
@@ -820,7 +730,7 @@ const ChannelDetailPage: React.FC = () => {
                   label="Overlays"
                   value={
                     <span className="flex items-center gap-1.5">
-                      <Layers className="h-3 w-3 text-muted-foreground" />
+                      <Layers className="w-3 h-3 text-gray-500" />
                       {channel.overlays?.length || 0}
                     </span>
                   }
@@ -829,10 +739,10 @@ const ChannelDetailPage: React.FC = () => {
             </div>
 
             {/* Live Stats */}
-            <div className="rounded-xl border border-border bg-card/80 p-4">
-              <div className="mb-4 flex items-center gap-2">
-                <Activity className="h-4 w-4 text-muted-foreground" />
-                <h3 className="text-sm font-medium text-foreground">Live Stats</h3>
+            <div className="bg-[#111111] border border-[#333333] rounded-lg p-4">
+              <div className="flex items-center gap-2 mb-4">
+                <Activity className="w-4 h-4 text-gray-400" />
+                <h3 className="text-sm font-medium text-white">Live Stats</h3>
               </div>
               {currentStats ? (
                 <div className="space-y-3">
@@ -856,14 +766,13 @@ const ChannelDetailPage: React.FC = () => {
                   )}
                 </div>
               ) : (
-                <p className="text-sm text-muted-foreground">
+                <p className="text-gray-600 text-sm">
                   {channel.status === 'ONLINE' ? 'Loading stats...' : 'No stats available (channel offline)'}
                 </p>
               )}
             </div>
-            </div>
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
       </div>
 
       {/* Switch Mode Modal */}

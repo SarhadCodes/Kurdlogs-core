@@ -1,10 +1,10 @@
 import type { McrSourceView } from '../../types/mcr';
 
 const healthDot: Record<string, string> = {
-  ONLINE: 'bg-zinc-300',
-  DEGRADED: 'bg-zinc-400',
-  OFFLINE: 'bg-red-700',
-  UNKNOWN: 'bg-zinc-600',
+  ONLINE: 'bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]',
+  DEGRADED: 'bg-amber-400',
+  OFFLINE: 'bg-red-500',
+  UNKNOWN: 'bg-gray-500',
 };
 
 export function SourceHealthStrip({ source }: { source: McrSourceView | null }) {
@@ -21,7 +21,7 @@ export function SourceHealthStrip({ source }: { source: McrSourceView | null }) 
     <div className="grid grid-cols-3 sm:grid-cols-7 gap-2 px-3 py-2 text-[10px] border-t border-[#222] bg-[#0d0d0d]">
       <div>
         <span className="block uppercase text-gray-600">Status</span>
-        <span className={`flex items-center gap-1 ${h.status === 'ONLINE' ? 'text-zinc-300' : 'text-gray-400'}`}>
+        <span className={`flex items-center gap-1 ${h.status === 'ONLINE' ? 'text-emerald-400' : 'text-gray-400'}`}>
           <span className={`w-1.5 h-1.5 rounded-full ${healthDot[h.status]}`} />
           {h.status}
         </span>

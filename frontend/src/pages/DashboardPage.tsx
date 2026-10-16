@@ -17,9 +17,6 @@ import Layout from '../components/Layout';
 import PageHeader from '../components/PageHeader';
 import LoadingSpinner from '../components/LoadingSpinner';
 import StatusBadge from '../components/StatusBadge';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Skeleton } from '@/components/ui/skeleton';
 
 interface OverviewCard {
   title: string;
@@ -47,7 +44,7 @@ const DashboardPage: React.FC = () => {
       setPlaylists(playlistRes.data || []);
       setTokens(tokenRes.data || []);
       if (showToast) toast.success('Dashboard refreshed');
-    } catch {
+    } catch (err: any) {
       toast.error('Failed to load dashboard data');
     } finally {
       setLoading(false);
@@ -71,64 +68,56 @@ const DashboardPage: React.FC = () => {
     {
       title: 'Total Channels',
       value: channels.length,
-      icon: <Tv className="h-5 w-5 text-muted-foreground" />,
+      icon: <Tv className="w-5 h-5 text-gray-400" />,
       subtitle: `${errorChannels.length} with errors`,
     },
     {
       title: 'Online Channels',
       value: onlineChannels.length,
-      icon: <Radio className="h-5 w-5 text-emerald-400" />,
+      icon: <Radio className="w-5 h-5 text-green-500" />,
       subtitle: `${channels.length > 0 ? Math.round((onlineChannels.length / channels.length) * 100) : 0}% uptime`,
     },
     {
       title: 'Total Playlists',
       value: playlists.length,
-      icon: <ListVideo className="h-5 w-5 text-muted-foreground" />,
+      icon: <ListVideo className="w-5 h-5 text-gray-400" />,
     },
     {
       title: 'Active Tokens',
       value: tokens.length,
-      icon: <Key className="h-5 w-5 text-muted-foreground" />,
+      icon: <Key className="w-5 h-5 text-gray-400" />,
     },
   ];
 
   const getStatusColor = (status: ChannelStatus): string => {
     switch (status) {
       case 'ONLINE':
-        return 'text-emerald-400';
+        return 'text-green-500';
       case 'ERROR':
-        return 'text-red-400';
+        return 'text-red-500';
       case 'STARTING':
       case 'STOPPING':
-        return 'text-amber-400';
+        return 'text-yellow-500';
       default:
-        return 'text-muted-foreground';
+        return 'text-gray-500';
     }
   };
 
   const getStatusIcon = (status: ChannelStatus) => {
     switch (status) {
       case 'ONLINE':
-        return <CircleDot className={`h-3 w-3 ${getStatusColor(status)}`} />;
+        return <CircleDot className={`w-3 h-3 ${getStatusColor(status)}`} />;
       case 'ERROR':
-        return <AlertCircle className={`h-3 w-3 ${getStatusColor(status)}`} />;
+        return <AlertCircle className={`w-3 h-3 ${getStatusColor(status)}`} />;
       default:
-        return <Activity className={`h-3 w-3 ${getStatusColor(status)}`} />;
+        return <Activity className={`w-3 h-3 ${getStatusColor(status)}`} />;
     }
   };
 
   if (loading) {
     return (
       <Layout>
-        <div className="space-y-6">
-          <Skeleton className="h-10 w-64" />
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            {[1, 2, 3, 4].map((i) => (
-              <Skeleton key={i} className="h-28 rounded-xl" />
-            ))}
-          </div>
-          <LoadingSpinner />
-        </div>
+        <LoadingSpinner />
       </Layout>
     );
   }
@@ -140,70 +129,74 @@ const DashboardPage: React.FC = () => {
           title="Dashboard"
           description="Overview of your streaming infrastructure"
           actions={
-            <Button variant="outline" onClick={handleRefresh} disabled={refreshing}>
-              <RefreshCw className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+            <button
+              onClick={handleRefresh}
+              disabled={refreshing}
+              className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[#222222] text-white text-sm rounded-md hover:bg-[#2a2a2a] border border-[#333333] transition-colors disabled:opacity-50 min-h-[44px]"
+            >
+              <RefreshCw className={`w-4 h-4 ${refreshing ? 'animate-spin' : ''}`} />
               Refresh
-            </Button>
+            </button>
           }
         />
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        {/* Overview Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           {overviewCards.map((card) => (
-            <Card key={card.title} className="bg-card/80">
-              <CardContent className="p-5">
-                <div className="mb-3 flex items-center justify-between">
-                  <span className="text-sm text-muted-foreground">{card.title}</span>
-                  {card.icon}
-                </div>
-                <div className="font-display text-3xl font-semibold tabular-nums text-foreground">
-                  {card.value}
-                </div>
-                {card.subtitle && (
-                  <p className="mt-1 text-xs text-muted-foreground">{card.subtitle}</p>
-                )}
-              </CardContent>
-            </Card>
+            <div
+              key={card.title}
+              className="bg-[#111111] border border-[#333333] rounded-lg p-5"
+            >
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-sm text-gray-400">{card.title}</span>
+                {card.icon}
+              </div>
+              <div className="text-3xl font-bold text-white">{card.value}</div>
+              {card.subtitle && (
+                <p className="text-xs text-gray-500 mt-1">{card.subtitle}</p>
+              )}
+            </div>
           ))}
         </div>
 
-        <Card className="overflow-hidden bg-card/80">
-          <CardHeader className="border-b border-border">
-            <CardTitle>Channel Status</CardTitle>
-          </CardHeader>
-          <CardContent className="p-0">
-            {channels.length === 0 ? (
-              <div className="p-8 text-center text-muted-foreground">
-                <Tv className="mx-auto mb-3 h-10 w-10 text-muted-foreground/50" />
-                <p>No channels created yet</p>
-                <Button variant="link" className="mt-2" onClick={() => navigate('/channels')}>
-                  Create your first channel
-                </Button>
-              </div>
-            ) : (
-              <div className="divide-y divide-border">
-                {channels.map((channel) => (
-                  <button
-                    key={channel.id}
-                    type="button"
-                    onClick={() => navigate(`/channels/${channel.id}`)}
-                    className="flex w-full items-center justify-between px-5 py-3 text-left transition-colors hover:bg-accent/60"
-                  >
-                    <div className="flex items-center gap-3">
-                      {getStatusIcon(channel.status)}
-                      <div>
-                        <p className="text-sm font-medium text-foreground">{channel.name}</p>
-                        <p className="font-mono text-xs text-muted-foreground">
-                          {channel.sourceType} · {channel.slug}
-                        </p>
-                      </div>
+        {/* Channel Status List */}
+        <div className="bg-[#111111] border border-[#333333] rounded-lg">
+          <div className="px-5 py-4 border-b border-[#333333]">
+            <h2 className="text-lg font-semibold text-white">Channel Status</h2>
+          </div>
+
+          {channels.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">
+              <Tv className="w-10 h-10 mx-auto mb-3 text-gray-600" />
+              <p>No channels created yet</p>
+              <button
+                onClick={() => navigate('/channels')}
+                className="mt-3 text-sm text-white underline hover:no-underline"
+              >
+                Create your first channel
+              </button>
+            </div>
+          ) : (
+            <div className="divide-y divide-[#222222]">
+              {channels.map((channel) => (
+                <div
+                  key={channel.id}
+                  onClick={() => navigate(`/channels/${channel.id}`)}
+                  className="flex items-center justify-between px-5 py-3 hover:bg-[#1a1a1a] cursor-pointer transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    {getStatusIcon(channel.status)}
+                    <div>
+                      <p className="text-white text-sm font-medium">{channel.name}</p>
+                      <p className="text-gray-500 text-xs">{channel.sourceType} &middot; {channel.slug}</p>
                     </div>
-                    <StatusBadge status={channel.status} />
-                  </button>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+                  </div>
+                  <StatusBadge status={channel.status} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </Layout>
   );

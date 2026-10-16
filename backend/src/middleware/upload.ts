@@ -6,11 +6,9 @@ import { AppError } from './errorHandler';
 
 const videoDir = path.join(env.UPLOADS_DIR, 'videos');
 const logoDir = path.join(env.UPLOADS_DIR, 'logos');
-const avatarDir = path.join(env.UPLOADS_DIR, 'avatars');
 
 if (!fs.existsSync(videoDir)) fs.mkdirSync(videoDir, { recursive: true });
 if (!fs.existsSync(logoDir)) fs.mkdirSync(logoDir, { recursive: true });
-if (!fs.existsSync(avatarDir)) fs.mkdirSync(avatarDir, { recursive: true });
 
 const VIDEO_EXT = /\.(mp4|mkv|avi|mov|m4v|ts|m2ts|webm|flv|wmv|mpeg|mpg|3gp)$/i;
 
@@ -31,16 +29,6 @@ const logoStorage = multer.diskStorage({
   filename: (_req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
-  },
-});
-
-const avatarStorage = multer.diskStorage({
-  destination: (_req, _file, cb) => {
-    cb(null, avatarDir);
-  },
-  filename: (_req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, 'avatar-' + uniqueSuffix + path.extname(file.originalname).toLowerCase());
   },
 });
 
@@ -75,12 +63,6 @@ export const videoUpload = multer({
 export const logoUpload = multer({
   storage: logoStorage,
   limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: imageFilter,
-});
-
-export const avatarUpload = multer({
-  storage: avatarStorage,
-  limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: imageFilter,
 });
 

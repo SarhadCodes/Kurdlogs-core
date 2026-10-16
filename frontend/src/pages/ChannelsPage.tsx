@@ -17,10 +17,6 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import ChannelCard from '../components/ChannelCard';
 import Modal from '../components/Modal';
 import EmptyState from '../components/EmptyState';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { cn } from '@/lib/utils';
 
 const SOURCE_TYPES: SourceType[] = ['M3U8', 'MP4', 'RTMP', 'MPEGTS', 'SRT', 'UDP', 'HTTP'];
 
@@ -221,32 +217,41 @@ const ChannelsPage: React.FC = () => {
           description={`${channels.length} channel${channels.length !== 1 ? 's' : ''}`}
           actions={
             <>
-              <Button variant="outline" onClick={() => fetchData()}>
-                <RefreshCw className="h-4 w-4" />
-                Refresh
-              </Button>
-              <Button onClick={() => setShowCreateModal(true)} className="flex-1 sm:flex-none">
-                <Plus className="h-4 w-4" />
+              <button
+                onClick={() => fetchData()}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-[#222222] text-white text-sm rounded-md hover:bg-[#2a2a2a] border border-[#333333] transition-colors min-h-[44px]"
+              >
+                <RefreshCw className="w-4 h-4" />
+                <span className="hidden sm:inline">Refresh</span>
+              </button>
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center justify-center gap-2 px-4 py-2.5 bg-white text-black text-sm font-medium rounded-md hover:bg-gray-200 transition-colors min-h-[44px] flex-1 sm:flex-none"
+              >
+                <Plus className="w-4 h-4" />
                 Create Channel
-              </Button>
+              </button>
             </>
           }
         />
 
         {channels.length === 0 ? (
           <EmptyState
-            icon={<Tv className="h-12 w-12" />}
+            icon={<Tv className="w-12 h-12" />}
             title="No channels yet"
             description="Create your first channel to start streaming"
             action={
-              <Button onClick={() => setShowCreateModal(true)}>
-                <Plus className="h-4 w-4" />
+              <button
+                onClick={() => setShowCreateModal(true)}
+                className="flex items-center gap-2 px-4 py-2 bg-white text-black text-sm font-medium rounded-md hover:bg-gray-200 transition-colors"
+              >
+                <Plus className="w-4 h-4" />
                 Create Channel
-              </Button>
+              </button>
             }
           />
         ) : (
-          <div className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-5">
             {channels.map((channel) => (
               <ChannelCard
                 key={channel.id}
@@ -268,20 +273,20 @@ const ChannelsPage: React.FC = () => {
         title="Create Channel"
       >
         <form onSubmit={handleCreate} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="channel-name">Channel Name</Label>
-            <Input
-              id="channel-name"
+          <div>
+            <label className="block text-sm font-medium text-gray-400 mb-1.5">Channel Name</label>
+            <input
               type="text"
               value={formName}
               onChange={(e) => setFormName(e.target.value)}
               placeholder="My Channel"
+              className="w-full px-3 py-2 bg-[#111111] border border-[#333333] rounded-md text-white placeholder-gray-600 focus:outline-none focus:border-gray-500 text-sm"
             />
           </div>
 
           <div>
-            <Label className="mb-2 block">Channel Type</Label>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+            <label className="block text-sm font-medium text-gray-400 mb-2">Channel Type</label>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
               {MODE_OPTIONS.map((opt) => {
                 const Icon = opt.icon;
                 const selected = formMode === opt.id;
@@ -290,20 +295,27 @@ const ChannelsPage: React.FC = () => {
                     key={opt.id}
                     type="button"
                     onClick={() => selectCreateMode(opt.id)}
-                    className={cn(
-                      'rounded-lg border p-3 text-left transition',
+                    className={`text-left p-3 rounded-lg border transition ${
                       selected
-                        ? 'border-foreground/30 bg-secondary'
-                        : 'border-border bg-card hover:border-border'
-                    )}
+                        ? opt.id === 'blueprint'
+                          ? 'border-violet-500/60 bg-violet-950/30 ring-1 ring-violet-500/40'
+                          : 'border-white/40 bg-[#1a1a1a] ring-1 ring-white/20'
+                        : 'border-[#333] bg-[#111] hover:border-[#555]'
+                    }`}
                   >
                     <Icon
-                      className={cn('mb-1.5 h-4 w-4', selected ? 'text-primary' : 'text-muted-foreground')}
+                      className={`w-4 h-4 mb-1.5 ${
+                        selected
+                          ? opt.id === 'blueprint'
+                            ? 'text-violet-400'
+                            : 'text-white'
+                          : 'text-gray-500'
+                      }`}
                     />
-                    <p className={cn('text-sm font-medium', selected ? 'text-foreground' : 'text-muted-foreground')}>
+                    <p className={`text-sm font-medium ${selected ? 'text-white' : 'text-gray-300'}`}>
                       {opt.label}
                     </p>
-                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">{opt.description}</p>
+                    <p className="text-[11px] text-gray-600 mt-0.5 leading-snug">{opt.description}</p>
                   </button>
                 );
               })}
@@ -473,19 +485,23 @@ const ChannelsPage: React.FC = () => {
           </div>
 
           <div className="flex items-center justify-end gap-3 pt-2">
-            <Button
+            <button
               type="button"
-              variant="secondary"
               onClick={() => {
                 setShowCreateModal(false);
                 resetForm();
               }}
+              className="px-4 py-2 bg-[#222222] text-white text-sm rounded-md hover:bg-[#2a2a2a] border border-[#333333] transition-colors"
             >
               Cancel
-            </Button>
-            <Button type="submit" disabled={creating}>
+            </button>
+            <button
+              type="submit"
+              disabled={creating}
+              className="px-4 py-2 bg-white text-black text-sm font-medium rounded-md hover:bg-gray-200 transition-colors disabled:opacity-50"
+            >
               {creating ? 'Creating...' : 'Create Channel'}
-            </Button>
+            </button>
           </div>
         </form>
       </Modal>

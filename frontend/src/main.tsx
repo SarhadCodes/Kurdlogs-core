@@ -25,7 +25,11 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <Toaster
         position="top-right"
         toastOptions={{
-          className: '!bg-popover !text-popover-foreground !border-border',
+          style: {
+            background: '#111',
+            color: '#fff',
+            border: '1px solid #333',
+          },
         }}
       />
     </BrowserRouter>
